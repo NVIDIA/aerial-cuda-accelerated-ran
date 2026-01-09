@@ -42,6 +42,22 @@ This comprehensive technical report provides an in-depth analysis of CUDA multit
 
 ---
 
+## Important Note on Performance Metrics
+
+**Performance estimates in this report (including latency values, bandwidth calculations, and throughput figures) are analytical estimates based on 5G NR timing constraints and typical PHY processing characteristics. These are NOT derived from actual profiling or benchmarking of the NVIDIA Aerial SDK codebase.**
+
+**For actual performance measurements, users should:**
+- Run the cuPHY test bench (`cubb_gpu_test_bench`) with their specific configurations
+- Use the LDPC profiling script (`cuPHY/util/ldpc/ldpc_perf_collect.py`)
+- Enable timing measurements in production deployments
+- Profile with NVIDIA Nsight Systems for detailed kernel-level timing
+
+**Known actual measurements from the codebase:**
+- LDPC decoder: ~109.6 μs per codeword (from `cuPHY/util/ldpc/ldpc_profiling_notes.txt`)
+- Test bench provides aggregate timing for full PDSCH/PUSCH processing via CUDA events
+
+---
+
 ## Table of Contents
 
 1. [Introduction and Background](#1-introduction-and-background)
@@ -841,7 +857,7 @@ for (int slot = 0; slot < num_slots; slot++) {
 - CPU overhead reduced to single graph launch (~1-2 microseconds)
 - Eliminates per-kernel launch overhead
 - Better scheduling and overlap opportunities
-- 10-30% performance improvement for repetitive workloads
+- Estimated 10-30% performance improvement for repetitive workloads (typical CUDA graph benefits, not measured)
 
 **Disadvantages**:
 - Less flexibility - graph must be re-captured for config changes
@@ -2565,16 +2581,16 @@ cudaMemcpyAsync(h_output, d_output, output_size,
 
 #### 8.4.2 Memcpy Timing Analysis
 
-Typical transfer times for different TB sizes (PCIe Gen4 x16, ~25 GB/s):
+Estimated transfer times for different TB sizes (PCIe Gen4 x16, ~25 GB/s theoretical) ⚠️ **ESTIMATED**:
 
-| TB Size | Transfer Time (H2D) | Kernel Time | Transfer Time (D2H) | Total |
+| TB Size | Est. Transfer Time (H2D) | Est. Kernel Time | Est. Transfer Time (D2H) | Est. Total |
 |---------|---------------------|-------------|---------------------|-------|
-| 100 B | 4 μs | 10 μs | 10 μs | 24 μs |
-| 1 KB | 5 μs | 15 μs | 50 μs | 70 μs |
-| 10 KB | 10 μs | 50 μs | 200 μs | 260 μs |
-| 100 KB | 50 μs | 300 μs | 2000 μs | 2350 μs |
+| 100 B | ~4 μs | ~10 μs | ~10 μs | ~24 μs |
+| 1 KB | ~5 μs | ~15 μs | ~50 μs | ~70 μs |
+| 10 KB | ~10 μs | ~50 μs | ~200 μs | ~260 μs |
+| 100 KB | ~50 μs | ~300 μs | ~2000 μs | ~2350 μs |
 
-**Optimization**: For small TBs (<10 KB), transfer overhead dominates. Solution: Batch multiple TBs before transfer.
+**Typical Optimization**: For small TBs (<10 KB), transfer overhead may dominate. Solution: Batch multiple TBs before transfer.
 
 ### 8.5 Workspace Management
 
@@ -2927,14 +2943,16 @@ __global__ void layer_mapping_lockfree(
 
 ### 10.1 Stream Mode vs Graph Mode
 
-#### 10.1.1 Performance Comparison
+#### 10.1.1 Performance Comparison ⚠️ **ESTIMATED**
 
-| Metric | Stream Mode | Graph Mode | Improvement |
+> These are typical CUDA graph performance improvements, not measured from Aerial SDK
+
+| Metric | Stream Mode (est.) | Graph Mode (est.) | Estimated Improvement |
 |--------|-------------|------------|-------------|
-| CPU overhead per launch | 10-20 μs | 1-2 μs | 5-10x |
-| GPU utilization | 70-80% | 85-95% | 1.2x |
-| Latency (single TB) | 50 μs | 45 μs | 10% |
-| Throughput (100 TBs) | 5000 TB/s | 6500 TB/s | 30% |
+| CPU overhead per launch | ~10-20 μs | ~1-2 μs | ~5-10x |
+| GPU utilization | ~70-80% | ~85-95% | ~1.2x |
+| Latency (single TB) | ~50 μs | ~45 μs | ~10% |
+| Throughput (100 TBs) | ~5000 TB/s | ~6500 TB/s | ~30% |
 
 #### 10.1.2 When to Use Each Mode
 
@@ -3577,6 +3595,20 @@ const char* cuphyStatusToString(cuphyStatus_t status) {
 
 ## 13. Resource Constraints and Scaling Limits
 
+> **⚠️ PERFORMANCE ESTIMATES DISCLAIMER**
+>
+> The latency breakdowns, bandwidth calculations, and throughput estimates in this chapter are **analytical estimates** based on 5G NR specifications and typical GPU processing characteristics. These values were **NOT measured** from the NVIDIA Aerial SDK codebase.
+>
+> **These estimates should be used for:**
+> - Understanding relative bottlenecks between processing stages
+> - Architectural planning and design discussions
+> - Identifying areas requiring profiling
+>
+> **For production planning, always:**
+> - Measure actual performance with your specific configuration
+> - Use `cubb_gpu_test_bench` with representative test vectors
+> - Profile with NVIDIA Nsight Systems/Compute
+
 ### 13.1 Maximum Configuration Limits
 
 From `cuPHY/src/cuphy/cuphy.h` (lines 98-122):
@@ -3672,23 +3704,25 @@ This allocates SMs to different subcontexts:
 
 **Available Processing Time**: ~250 μs (assuming 50% budget for DL)
 
-**Per-Stage Latency** (20 cells, 128 UEs):
+**Per-Stage Latency Estimates** (20 cells, 128 UEs) ⚠️ **ESTIMATED VALUES**:
 
-| Stage | Latency | Percentage |
+> ⚠️ **These are analytical estimates, NOT actual measurements**. The only confirmed measurement is LDPC decoder: ~109.6 μs per codeword (see `cuPHY/util/ldpc/ldpc_profiling_notes.txt`). Actual encoder performance may differ.
+
+| Stage | Estimated Latency | Percentage |
 |-------|---------|------------|
-| CRC | 10 μs | 4% |
-| LDPC | 120 μs | 48% |
-| Rate Match | 40 μs | 16% |
-| Scramble | 5 μs | 2% |
-| Modulation | 30 μs | 12% |
-| Layer Map | 15 μs | 6% |
-| DMRS | 10 μs | 4% |
-| Overhead | 20 μs | 8% |
-| **Total** | **250 μs** | **100%** |
+| CRC | ~10 μs | ~4% |
+| LDPC | ~120 μs | ~48% |
+| Rate Match | ~40 μs | ~16% |
+| Scramble | ~5 μs | ~2% |
+| Modulation | ~30 μs | ~12% |
+| Layer Map | ~15 μs | ~6% |
+| DMRS | ~10 μs | ~4% |
+| Overhead | ~20 μs | ~8% |
+| **Total** | **~250 μs** | **~100%** |
 
-**Bottleneck**: LDPC encoding (48% of time)
+**Likely Bottleneck**: LDPC encoding (estimated ~48% of time)
 
-**Optimization Focus**: Parallelize LDPC across more SMs, optimize kernel for better occupancy.
+**Optimization Focus**: Parallelize LDPC across more SMs, optimize kernel for better occupancy. **Measure actual performance first** using test bench.
 
 ### 13.4 Memory Bandwidth Constraints
 
@@ -3696,17 +3730,17 @@ This allocates SMs to different subcontexts:
 
 H100 HBM bandwidth: ~3.35 TB/s (theoretical)
 
-**Data Movement Analysis** (20 cells, 128 UEs, 250 μs):
+**Data Movement Analysis** (20 cells, 128 UEs, 250 μs) ⚠️ **ESTIMATED**:
 
-| Operation | Data Size | Bandwidth Required |
+| Operation | Estimated Data Size | Estimated Bandwidth Required |
 |-----------|-----------|-------------------|
-| TB input (H2D) | 20 * 128 * 50 KB = 128 MB | 512 GB/s |
-| CB read (LDPC) | 20 * 800 * 1 KB = 16 MB | 64 GB/s |
-| CB write (LDPC) | 20 * 800 * 2 KB = 32 MB | 128 GB/s |
-| Symbols output (D2H) | 20 * 128 * 100K * 8 B = 2 GB | 8 TB/s |
+| TB input (H2D) | ~128 MB | ~512 GB/s |
+| CB read (LDPC) | ~16 MB | ~64 GB/s |
+| CB write (LDPC) | ~32 MB | ~128 GB/s |
+| Symbols output (D2H) | ~2 GB | ~8 TB/s |
 | **Total** | **~2.2 GB** | **~8.7 TB/s** |
 
-**Conclusion**: Bandwidth requirement (~8.7 TB/s) exceeds HBM capacity (~3.35 TB/s). Need optimization:
+**Estimated Conclusion**: Bandwidth requirement (~8.7 TB/s) may exceed HBM capacity (~3.35 TB/s). Optimizations to consider:
 - Reduce data movement (in-place operations)
 - Optimize memory access patterns (coalescing)
 - Use shared memory for frequently accessed data
@@ -3715,19 +3749,19 @@ H100 HBM bandwidth: ~3.35 TB/s (theoretical)
 
 #### 13.5.1 Host-Device Transfer Limits
 
-PCIe Gen4 x16: ~25 GB/s (bidirectional)
+PCIe Gen4 x16: ~25 GB/s (bidirectional, theoretical)
 
-**Transfer Analysis** (per slot, 0.5 ms):
+**Transfer Analysis** (per slot, 0.5 ms) ⚠️ **ESTIMATED**:
 
-| Transfer | Size | Time | Bandwidth |
+| Transfer | Estimated Size | Estimated Time | Assumed Bandwidth |
 |----------|------|------|-----------|
-| TB input (H2D) | 128 MB | 5.1 ms | 25 GB/s |
-| Symbols output (D2H) | 2 GB | 80 ms | 25 GB/s |
-| **Total** | **2.13 GB** | **85.1 ms** | **25 GB/s** |
+| TB input (H2D) | ~128 MB | ~5.1 ms | ~25 GB/s |
+| Symbols output (D2H) | ~2 GB | ~80 ms | ~25 GB/s |
+| **Total** | **~2.13 GB** | **~85.1 ms** | **~25 GB/s** |
 
-**Problem**: Transfer time (85.1 ms) >> slot duration (0.5 ms)
+**Estimated Challenge**: Transfer time (~85.1 ms) >> slot duration (0.5 ms)
 
-**Solution**: Keep data on GPU across slots
+**Typical Solution**: Keep data on GPU across slots
 - Persistent TB buffers on GPU
 - Stream TBs from L2/MAC continuously
 - Only transfer final IQ samples to fronthaul
@@ -4002,14 +4036,14 @@ This comprehensive analysis of CUDA multithread processing for PDSCH Transport B
 **1. Architectural Highlights**:
 - Three-level parallelism: GPU stream-level, TB-level, and cell-group-level
 - Support for up to 64 cells with 256 UEs each (8,192 TBs total capacity)
-- Dual processing modes (Stream and CUDA Graph) with 30% performance difference
+- Dual processing modes (Stream and CUDA Graph) with estimated 10-30% performance difference
 - Real-time worker thread architecture with SCHED_FIFO scheduling
 
-**2. Performance Characteristics**:
-- LDPC encoding dominates processing time (48% of total)
-- Memory bandwidth (8.7 TB/s required) exceeds HBM capacity (3.35 TB/s)
+**2. Performance Characteristics** (⚠️ based on estimates - see disclaimer):
+- LDPC encoding estimated to dominate processing time (~48% of total)
+- Estimated memory bandwidth (~8.7 TB/s required) may exceed HBM capacity (3.35 TB/s)
 - Code block limit (19,456) constrains scalability before GPU memory (~19 cells)
-- CUDA Graph mode reduces CPU overhead by 5-10x compared to Stream mode
+- CUDA Graph mode expected to reduce CPU overhead by ~5-10x compared to Stream mode
 
 **3. Implementation Quality**:
 - Well-structured pipeline with clear component separation
@@ -4024,22 +4058,22 @@ This comprehensive analysis of CUDA multithread processing for PDSCH Transport B
 **1. Increase TB Byte Alignment to 32 Bytes**
 - Current: Configurable (often 16 bytes)
 - Recommended: 32 bytes (256-bit vector loads)
-- Expected gain: 10-15% memory bandwidth improvement
+- Estimated potential gain: 10-15% memory bandwidth improvement
 
 **2. Enable CUDA Graph Mode by Default**
 - Current: Often disabled for flexibility
 - Recommended: Enable for production workloads
-- Expected gain: 20-30% throughput improvement
+- Estimated potential gain: 10-30% throughput improvement (typical CUDA graph benefits)
 
 **3. Tune SM Allocation**
 - Current: Generic allocation
 - Recommended: Profile-guided allocation per GPU architecture
-- Expected gain: 5-10% better GPU utilization
+- Estimated potential gain: 5-10% better GPU utilization
 
 **4. Implement Buffer Pooling**
 - Current: Per-slot allocation/deallocation
 - Recommended: Persistent buffer pool with reuse
-- Expected gain: Reduced allocation overhead, lower latency variance
+- Estimated potential gain: Reduced allocation overhead, lower latency variance
 
 #### 15.2.2 Medium-Term Optimizations (High Impact, Moderate Effort)
 
@@ -4047,13 +4081,13 @@ This comprehensive analysis of CUDA multithread processing for PDSCH Transport B
 - Profile current LDPC kernels
 - Optimize for higher occupancy (target >75%)
 - Implement shared memory caching for parity matrix
-- Expected gain: 20-30% LDPC performance improvement
+- Estimated potential gain: 20-30% LDPC performance improvement
 
 **2. Memory Bandwidth Reduction**
 - Implement in-place operations where possible
 - Reduce intermediate buffer sizes
 - Use shared memory for frequently accessed data
-- Expected gain: 30-40% bandwidth reduction
+- Estimated potential gain: 30-40% bandwidth reduction
 
 **3. Enhanced Multi-Streaming**
 - Increase stream pool size to 16-32
