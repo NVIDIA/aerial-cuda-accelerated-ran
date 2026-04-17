@@ -249,11 +249,11 @@ enum class UserDataCompressionMethod : uint8_t
 
 // Configuration-dependent cell limits
 #ifdef ENABLE_64C
-#define API_MAX_NUM_CELLS 64  //!< Maximum cells (64-cell config, power of 2 for DOCA)
+#define API_MAX_NUM_CELLS 2  //!< Maximum cells (64-cell config, power of 2 for DOCA)
 #elif defined(ENABLE_20C)
-#define API_MAX_NUM_CELLS 32  //!< Maximum cells (20-cell config, power of 2 for DOCA)
+#define API_MAX_NUM_CELLS 2  //!< Maximum cells (20-cell config, power of 2 for DOCA)
 #else
-#define API_MAX_NUM_CELLS 16  //!< Maximum cells (default config)
+#define API_MAX_NUM_CELLS 2  //!< Maximum cells (default config)
 #endif
 
 #ifdef ENABLE_32DL
