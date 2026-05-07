@@ -228,7 +228,7 @@ def run_config(params, verbose):
     if verbose:
         print(cmd)
     #-------------------------------------------------------------------
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
     res = {}
     while True:
         line = proc.stdout.readline().decode('ascii')

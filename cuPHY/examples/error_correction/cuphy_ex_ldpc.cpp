@@ -18,6 +18,7 @@
 #include "cuphy.h"
 #include <cstdio>
 #include <string>
+#include <nvtx3/nvToolsExt.h>
 #include "CLI/CLI.hpp"  // CLI11 header
 #include "cuphy.hpp"
 #include "cuphy_hdf5.hpp"
@@ -143,6 +144,7 @@ private:
 int main(int argc, char* argv[])
 {
     int returnValue = 0;
+    bool quiet = false;
     
     cuphyNvlogFmtHelper nvlog_fmt("ldpc_decoder.log");
     
@@ -160,7 +162,7 @@ int main(int argc, char* argv[])
         int          parityNodes          = 8;
         int          algoIndex            = 0;
         bool         compareDecodeOutput  = true;
-        unsigned int numRuns              = 1;
+        unsigned int numRuns              = 10;
         int          numCBLimit           = -1;
         bool         doWarmup             = true;
         float        minSumNorm           = 0.0f;
@@ -264,7 +266,7 @@ int main(int argc, char* argv[])
             ->group("Execution (Common) Options");
             
         app.add_option("-r", numRuns, 
-            "Number of times to perform batch decoding (default: 1)")
+            "Number of times to perform batch decoding (default: 10)")
             ->check(CLI::PositiveNumber)
             ->group("Execution (Common) Options");
             
@@ -282,6 +284,10 @@ int main(int argc, char* argv[])
         app.add_flag("-u", writeSoftOutputs, 
             "Write soft output data into a buffer. If an output file name is provided\n"
             "via the -o option, the soft output LLR values will be placed in the file.")
+            ->group("Execution (Common) Options");
+
+        app.add_flag("-q,--quiet", quiet,
+            "Quiet mode: suppress all output")
             ->group("Execution (Common) Options");
 
         // File Based Input options
@@ -366,9 +372,12 @@ int main(int argc, char* argv[])
 
         //--------------------------------------------------------------
         // Display device (GPU) info
-        printf("*********************************************************************\n");
         cuphy::device gpuDevice;
-        printf("%s\n", gpuDevice.desc().c_str());
+        if(!quiet)
+        {
+            printf("*********************************************************************\n");
+            printf("%s\n", gpuDevice.desc().c_str());
+        }
         //--------------------------------------------------------------
         // Create a cuPHY context
         cuphy::context ctx;
@@ -411,7 +420,10 @@ int main(int argc, char* argv[])
         // Display LDPC test vector configuration info
         ldpc_decode_test_vec&              tv  = *ptv;
         const ldpc_decode_test_vec_config& tv_cfg = tv.config();
-        tv.print_config();
+        if(!quiet)
+        {
+            tv.print_config();
+        }
 
         //------------------------------------------------------------------
         // Allocate an output buffer for decoded bits
@@ -458,9 +470,12 @@ int main(int argc, char* argv[])
         {
             dec.set_normalization(dec_cfg);
         }
-        printf("Normalization                    = %f\n", dec_cfg.get_norm());
-        printf("Number of iterations             = %i\n", numIterations);
-        printf("\n");
+        if(!quiet)
+        {
+            printf("Normalization                    = %f\n", dec_cfg.get_norm());
+            printf("Number of iterations             = %i\n", numIterations);
+            printf("\n");
+        }
         //--------------------------------------------------------------
         // Initialize an LDPC decode descriptor structure. (This is only
         // used when the transport block interface is selected.)
@@ -551,6 +566,7 @@ int main(int argc, char* argv[])
             cudaDeviceSynchronize();
             //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Timed run
+            nvtxRangePush("LDPC_decode_timed");
             cuphy::event_timer tmr;
 
             tmr.record_begin();
@@ -569,6 +585,7 @@ int main(int argc, char* argv[])
             }
             tmr.record_end();
             tmr.synchronize();
+            nvtxRangePop();
             timing_stats.update(tmr.elapsed_time_ms(), numRuns, tv_cfg.B * tv_cfg.num_cw);
             //- - - - - - - - - - - - - - - - - - - - - - - - - - - - -
             // Compare decoder output to source bits
@@ -600,32 +617,41 @@ int main(int argc, char* argv[])
         }
         //--------------------------------------------------------------
         // Display aggregated timing and error statistics
-        printf("Average (%li runs) elapsed time in usec = %.1f, throughput = %.2f Gbps\n",
-               timing_stats.num_runs(),
-               timing_stats.average_time_usec(),
-               timing_stats.throughput());
-
-        if(compareDecodeOutput)
+        if(!quiet)
         {
-            printf("bit error count = %lu, bit error rate (BER) = (%lu / %lu) = %.5e, block error rate (BLER) = (%u / %u) = %.5e\n",
-                   error_stats.bit_error_count(),
-                   error_stats.bit_error_count(),
-                   error_stats.bit_count(),
-                   error_stats.BER(),
-                   error_stats.block_error_count(),
-                   error_stats.block_count(),
-                   error_stats.BLER());
+            printf("Average (%li runs) elapsed time in usec = %.1f, throughput = %.2f Gbps\n",
+                   timing_stats.num_runs(),
+                   timing_stats.average_time_usec(),
+                   timing_stats.throughput());
+
+            if(compareDecodeOutput)
+            {
+                printf("bit error count = %lu, bit error rate (BER) = (%lu / %lu) = %.5e, block error rate (BLER) = (%u / %u) = %.5e\n",
+                       error_stats.bit_error_count(),
+                       error_stats.bit_error_count(),
+                       error_stats.bit_count(),
+                       error_stats.BER(),
+                       error_stats.block_error_count(),
+                       error_stats.block_count(),
+                       error_stats.BLER());
+            }
         }
     }
 
     catch(std::exception& e)
     {
-        NVLOGE_FMT(NVLOG_PUSCH, AERIAL_CUPHY_EVENT,  "EXCEPTION: {}", e.what());
+        if(!quiet)
+        {
+            NVLOGE_FMT(NVLOG_PUSCH, AERIAL_CUPHY_EVENT,  "EXCEPTION: {}", e.what());
+        }
         returnValue = 1;
     }
     catch(...)
     {
-        NVLOGE_FMT(NVLOG_PUSCH, AERIAL_CUPHY_EVENT,  "UNKNOWN EXCEPTION");
+        if(!quiet)
+        {
+            NVLOGE_FMT(NVLOG_PUSCH, AERIAL_CUPHY_EVENT,  "UNKNOWN EXCEPTION");
+        }
         returnValue = 2;
     }
     return returnValue;
