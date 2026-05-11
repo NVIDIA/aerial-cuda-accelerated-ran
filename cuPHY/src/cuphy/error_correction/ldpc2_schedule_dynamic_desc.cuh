@@ -235,56 +235,382 @@ struct ldpc_schedule_dynamic_desc<1,
     {
     }
     //------------------------------------------------------------------
+    // do_row()
+    template <int CHECK_IDX>
+    __device__
+    void do_row()
+    {
+        (*this).template process_row<CHECK_IDX>();
+        (void)(*this).template iter_sync_check_done<CHECK_IDX>();
+    }
+    //------------------------------------------------------------------
+    // process_rows_4_9_until()
+    __device__
+    void process_rows_4_9_until(int last_row)
+    {
+        if(last_row < 4)
+        {
+            return;
+        }
+
+        switch(last_row)
+        {
+        case 4:
+            do_row<4>();
+            break;
+        case 5:
+            do_row<4>();
+            do_row<5>();
+            break;
+        case 6:
+            do_row<4>();
+            do_row<5>();
+            do_row<6>();
+            break;
+        case 7:
+            do_row<4>();
+            do_row<5>();
+            do_row<6>();
+            do_row<7>();
+            break;
+        case 8:
+            do_row<4>();
+            do_row<5>();
+            do_row<6>();
+            do_row<7>();
+            do_row<8>();
+            break;
+        default: // >= 9
+            do_row<4>();
+            do_row<5>();
+            do_row<6>();
+            do_row<7>();
+            do_row<8>();
+            do_row<9>();
+            break;
+        }
+    }
+    //------------------------------------------------------------------
+    // process_rows_10_15_until()
+    __device__
+    void process_rows_10_15_until(int last_row)
+    {
+        if(last_row < 10)
+        {
+            return;
+        }
+
+        switch(last_row)
+        {
+        case 10:
+            do_row<10>();
+            break;
+        case 11:
+            do_row<10>();
+            do_row<11>();
+            break;
+        case 12:
+            do_row<10>();
+            do_row<11>();
+            do_row<12>();
+            break;
+        case 13:
+            do_row<10>();
+            do_row<11>();
+            do_row<12>();
+            do_row<13>();
+            break;
+        case 14:
+            do_row<10>();
+            do_row<11>();
+            do_row<12>();
+            do_row<13>();
+            do_row<14>();
+            break;
+        default: // >= 15
+            do_row<10>();
+            do_row<11>();
+            do_row<12>();
+            do_row<13>();
+            do_row<14>();
+            do_row<15>();
+            break;
+        }
+    }
+    //------------------------------------------------------------------
+    // process_rows_16_19_until()
+    __device__
+    void process_rows_16_19_until(int last_row)
+    {
+        if(last_row < 16)
+        {
+            return;
+        }
+
+        switch(last_row)
+        {
+        case 16:
+            do_row<16>();
+            break;
+        case 17:
+            do_row<16>();
+            do_row<17>();
+            break;
+        case 18:
+            do_row<16>();
+            do_row<17>();
+            do_row<18>();
+            break;
+        default: // >= 19
+            do_row<16>();
+            do_row<17>();
+            do_row<18>();
+            do_row<19>();
+            break;
+        }
+    }
+    //------------------------------------------------------------------
+    // process_rows_20_29_until()
+    __device__
+    void process_rows_20_29_until(int last_row)
+    {
+        if(last_row < 20)
+        {
+            return;
+        }
+
+        switch(last_row)
+        {
+        case 20:
+            do_row<20>();
+            break;
+        case 21:
+            do_row<20>();
+            do_row<21>();
+            break;
+        case 22:
+            do_row<20>();
+            do_row<21>();
+            do_row<22>();
+            break;
+        case 23:
+            do_row<20>();
+            do_row<21>();
+            do_row<22>();
+            do_row<23>();
+            break;
+        case 24:
+            do_row<20>();
+            do_row<21>();
+            do_row<22>();
+            do_row<23>();
+            do_row<24>();
+            break;
+        case 25:
+            do_row<20>();
+            do_row<21>();
+            do_row<22>();
+            do_row<23>();
+            do_row<24>();
+            do_row<25>();
+            break;
+        case 26:
+            do_row<20>();
+            do_row<21>();
+            do_row<22>();
+            do_row<23>();
+            do_row<24>();
+            do_row<25>();
+            do_row<26>();
+            break;
+        case 27:
+            do_row<20>();
+            do_row<21>();
+            do_row<22>();
+            do_row<23>();
+            do_row<24>();
+            do_row<25>();
+            do_row<26>();
+            do_row<27>();
+            break;
+        case 28:
+            do_row<20>();
+            do_row<21>();
+            do_row<22>();
+            do_row<23>();
+            do_row<24>();
+            do_row<25>();
+            do_row<26>();
+            do_row<27>();
+            do_row<28>();
+            break;
+        default: // >= 29
+            do_row<20>();
+            do_row<21>();
+            do_row<22>();
+            do_row<23>();
+            do_row<24>();
+            do_row<25>();
+            do_row<26>();
+            do_row<27>();
+            do_row<28>();
+            do_row<29>();
+            break;
+        }
+    }
+    //------------------------------------------------------------------
+    // process_rows_30_39_until()
+    __device__
+    void process_rows_30_39_until(int last_row)
+    {
+        if(last_row < 30)
+        {
+            return;
+        }
+
+        switch(last_row)
+        {
+        case 30:
+            do_row<30>();
+            break;
+        case 31:
+            do_row<30>();
+            do_row<31>();
+            break;
+        case 32:
+            do_row<30>();
+            do_row<31>();
+            do_row<32>();
+            break;
+        case 33:
+            do_row<30>();
+            do_row<31>();
+            do_row<32>();
+            do_row<33>();
+            break;
+        case 34:
+            do_row<30>();
+            do_row<31>();
+            do_row<32>();
+            do_row<33>();
+            do_row<34>();
+            break;
+        case 35:
+            do_row<30>();
+            do_row<31>();
+            do_row<32>();
+            do_row<33>();
+            do_row<34>();
+            do_row<35>();
+            break;
+        case 36:
+            do_row<30>();
+            do_row<31>();
+            do_row<32>();
+            do_row<33>();
+            do_row<34>();
+            do_row<35>();
+            do_row<36>();
+            break;
+        case 37:
+            do_row<30>();
+            do_row<31>();
+            do_row<32>();
+            do_row<33>();
+            do_row<34>();
+            do_row<35>();
+            do_row<36>();
+            do_row<37>();
+            break;
+        case 38:
+            do_row<30>();
+            do_row<31>();
+            do_row<32>();
+            do_row<33>();
+            do_row<34>();
+            do_row<35>();
+            do_row<36>();
+            do_row<37>();
+            do_row<38>();
+            break;
+        default: // >= 39
+            do_row<30>();
+            do_row<31>();
+            do_row<32>();
+            do_row<33>();
+            do_row<34>();
+            do_row<35>();
+            do_row<36>();
+            do_row<37>();
+            do_row<38>();
+            do_row<39>();
+            break;
+        }
+    }
+    //------------------------------------------------------------------
+    // process_rows_40_45_until()
+    __device__
+    void process_rows_40_45_until(int last_row)
+    {
+        if(last_row < 40)
+        {
+            return;
+        }
+
+        switch(last_row)
+        {
+        case 40:
+            do_row<40>();
+            break;
+        case 41:
+            do_row<40>();
+            do_row<41>();
+            break;
+        case 42:
+            do_row<40>();
+            do_row<41>();
+            do_row<42>();
+            break;
+        case 43:
+            do_row<40>();
+            do_row<41>();
+            do_row<42>();
+            do_row<43>();
+            break;
+        case 44:
+            do_row<40>();
+            do_row<41>();
+            do_row<42>();
+            do_row<43>();
+            do_row<44>();
+            break;
+        default: // >= 45
+            do_row<40>();
+            do_row<41>();
+            do_row<42>();
+            do_row<43>();
+            do_row<44>();
+            do_row<45>();
+            break;
+        }
+    }
+    //------------------------------------------------------------------
     // do_iteration()
     __device__
     void do_iteration()
     {
-        (*this).template process_row<0> (); __syncthreads();
-        (*this).template process_row<1> (); __syncthreads();
-        (*this).template process_row<2> (); __syncthreads();
-        (*this).template process_row<3> (); if((*this).template iter_sync_check_done< 3>()) return;
-        (*this).template process_row<4> (); if((*this).template iter_sync_check_done< 4>()) return;
-        (*this).template process_row<5> (); if((*this).template iter_sync_check_done< 5>()) return;
-        (*this).template process_row<6> (); if((*this).template iter_sync_check_done< 6>()) return;
-        (*this).template process_row<7> (); if((*this).template iter_sync_check_done< 7>()) return;
-        (*this).template process_row<8> (); if((*this).template iter_sync_check_done< 8>()) return;
-        (*this).template process_row<9> (); if((*this).template iter_sync_check_done< 9>()) return;
-        (*this).template process_row<10>(); if((*this).template iter_sync_check_done<10>()) return;
-        (*this).template process_row<11>(); if((*this).template iter_sync_check_done<11>()) return;
-        (*this).template process_row<12>(); if((*this).template iter_sync_check_done<12>()) return;
-        (*this).template process_row<13>(); if((*this).template iter_sync_check_done<13>()) return;
-        (*this).template process_row<14>(); if((*this).template iter_sync_check_done<14>()) return;
-        (*this).template process_row<15>(); if((*this).template iter_sync_check_done<15>()) return;
-        (*this).template process_row<16>(); if((*this).template iter_sync_check_done<16>()) return;
-        (*this).template process_row<17>(); if((*this).template iter_sync_check_done<17>()) return;
-        (*this).template process_row<18>(); if((*this).template iter_sync_check_done<18>()) return;
-        (*this).template process_row<19>(); if((*this).template iter_sync_check_done<19>()) return;
-        (*this).template process_row<20>(); if((*this).template iter_sync_check_done<20>()) return;
-        (*this).template process_row<21>(); if((*this).template iter_sync_check_done<21>()) return;
-        (*this).template process_row<22>(); if((*this).template iter_sync_check_done<22>()) return;
-        (*this).template process_row<23>(); if((*this).template iter_sync_check_done<23>()) return;
-        (*this).template process_row<24>(); if((*this).template iter_sync_check_done<24>()) return;
-        (*this).template process_row<25>(); if((*this).template iter_sync_check_done<25>()) return;
-        (*this).template process_row<26>(); if((*this).template iter_sync_check_done<26>()) return;
-        (*this).template process_row<27>(); if((*this).template iter_sync_check_done<27>()) return;
-        (*this).template process_row<28>(); if((*this).template iter_sync_check_done<28>()) return;
-        (*this).template process_row<29>(); if((*this).template iter_sync_check_done<29>()) return;
-        (*this).template process_row<30>(); if((*this).template iter_sync_check_done<30>()) return;
-        (*this).template process_row<31>(); if((*this).template iter_sync_check_done<31>()) return;
-        (*this).template process_row<32>(); if((*this).template iter_sync_check_done<32>()) return;
-        (*this).template process_row<33>(); if((*this).template iter_sync_check_done<33>()) return;
-        (*this).template process_row<34>(); if((*this).template iter_sync_check_done<34>()) return;
-        (*this).template process_row<35>(); if((*this).template iter_sync_check_done<35>()) return;
-        (*this).template process_row<36>(); if((*this).template iter_sync_check_done<36>()) return;
-        (*this).template process_row<37>(); if((*this).template iter_sync_check_done<37>()) return;
-        (*this).template process_row<38>(); if((*this).template iter_sync_check_done<38>()) return;
-        (*this).template process_row<39>(); if((*this).template iter_sync_check_done<39>()) return;
-        (*this).template process_row<40>(); if((*this).template iter_sync_check_done<40>()) return;
-        (*this).template process_row<41>(); if((*this).template iter_sync_check_done<41>()) return;
-        (*this).template process_row<42>(); if((*this).template iter_sync_check_done<42>()) return;
-        (*this).template process_row<43>(); if((*this).template iter_sync_check_done<43>()) return;
-        (*this).template process_row<44>(); if((*this).template iter_sync_check_done<44>()) return;
-        (*this).template process_row<45>(); __syncthreads();
+        (*this).template process_row<0>(); __syncthreads();
+        (*this).template process_row<1>(); __syncthreads();
+        (*this).template process_row<2>(); __syncthreads();
+        (*this).template process_row<3>(); (void)(*this).template iter_sync_check_done<3>();
+
+        const int last_row = (*this).num_parity_nodes_i32 - 1;
+        process_rows_4_9_until(last_row);
+        process_rows_10_15_until(last_row);
+        process_rows_16_19_until(last_row);
+        process_rows_20_29_until(last_row);
+        process_rows_30_39_until(last_row);
+        process_rows_40_45_until(last_row);
     }
 };
 
