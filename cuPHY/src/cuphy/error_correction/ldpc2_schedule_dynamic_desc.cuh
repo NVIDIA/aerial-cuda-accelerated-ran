@@ -87,6 +87,7 @@ struct ldpc_schedule_dynamic_desc_base
         c2v_cache(p),
         app_addr_gen(p, bg_desc, t_idx),
         params(p),
+        num_parity_nodes_i32(static_cast<int>(p.num_parity_nodes)),
         smem_offset(soffset)
     {
         c2v_cache.init();
@@ -102,6 +103,7 @@ struct ldpc_schedule_dynamic_desc_base
         c2v_cache(smem, p),
         app_addr_gen(p, bg_desc, t_idx),
         params(p),
+        num_parity_nodes_i32(static_cast<int>(p.num_parity_nodes)),
         smem_offset(soffset)
     {
         c2v_cache.init();
@@ -158,7 +160,7 @@ struct ldpc_schedule_dynamic_desc_base
             // In some cases, row APP updates will not overlap with
             // those of the following row. We can skip the sync there,
             // UNLESS it is the last row.
-            const bool IS_LAST_ROW = ((CHECK_IDX + 1) == params.num_parity_nodes);
+            const bool IS_LAST_ROW = ((CHECK_IDX + 1) == num_parity_nodes_i32);
         
             if(IS_LAST_ROW || row_seq_sync<BG, CHECK_IDX>::value)
             {
@@ -172,6 +174,7 @@ struct ldpc_schedule_dynamic_desc_base
     TC2VCache            c2v_cache;
     TAPPLoc              app_addr_gen;
     const TKernelParams& params;
+    const int            num_parity_nodes_i32;
     const int            smem_offset;
 };
 
