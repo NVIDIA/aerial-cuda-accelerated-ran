@@ -53,6 +53,8 @@ namespace
     // Number of per-row storage words
     [[maybe_unused]] const int NUM_STORAGE_WORDS_BG1 = 10;
     [[maybe_unused]] const int NUM_STORAGE_WORDS_BG2 = 5;
+    [[maybe_unused]] const int NUM_STORAGE_WORDS_BG1_FAST_CORE    = NUM_STORAGE_WORDS_BG1;
+    [[maybe_unused]] const int NUM_STORAGE_WORDS_BG1_FAST_NONCORE = NUM_STORAGE_WORDS_BG1;
 
     // APP address calculation
     // Using floating point instruction APP address calculation
@@ -87,6 +89,48 @@ namespace
                                                                                CHECK_IDX,
                                                                                TC2VStorage,
                                                                                box_plus_row_proc<box_plus_op>>;
+
+    //------------------------------------------------------------------
+    // Kernel configuration structure with split C2V storage for core
+    // and non-core parity rows.
+    template <int   BG_,
+              int   NUM_STORAGE_WORDS_CORE,
+              int   NUM_STORAGE_WORDS_NONCORE,
+              int   MAX_PARITY_ROWS,
+              class TKernelParams>
+    struct ldpc2_reg_box_plus_kernel_config_core_split
+    {
+        static constexpr int BG              = BG_;
+        static constexpr int MIN_PARITY_ROWS = 4;
+
+        typedef ldpc2::C2V_storage_t<__half, NUM_STORAGE_WORDS_CORE>    c2v_storage_core_t;
+        typedef ldpc2::C2V_storage_t<__half, NUM_STORAGE_WORDS_NONCORE> c2v_storage_noncore_t;
+        typedef TKernelParams                                            kernel_params_t;
+
+        typedef C2V_row_proc<__half,
+                             BG,
+                             box_plus_all_row_map_t,
+                             app_loader,
+                             app_writer> c2v_t;
+
+        typedef ldpc2::c2v_cache_register_core<BG,
+                                               MAX_PARITY_ROWS,
+                                               c2v_t,
+                                               c2v_storage_core_t,
+                                               c2v_storage_noncore_t,
+                                               kernel_params_t> c2v_cache_t;
+
+        typedef ldpc2::llr_loader_variable_batch<__half, 4, llr_op_clamp> llr_loader_t;
+        typedef typename llr_loader_t::app_buf_t                          app_buf_t;
+
+        typedef ldpc2::ldpc_schedule_dynamic_desc<BG,
+                                                  app_loc_t<BG_>,
+                                                  c2v_cache_t,
+                                                  kernel_params_t,
+                                                  typename app_loc_t<BG_>::bg_desc_t,
+                                                  MIN_PARITY_ROWS,
+                                                  MAX_PARITY_ROWS> sched_t;
+    };
     //------------------------------------------------------------------
     // Kernel configuration structure, with typedefs for kernel execution
     // BG_: base graph (1 or 2)
@@ -285,10 +329,11 @@ void ldpc2_BG1_reg_box_plus_tb_Z384_fast(LDPC2_GRID_CONST cuphyLDPCDecodeDesc_t 
 
     //------------------------------------------------------------------
     // Kernel configuration template
-    typedef ldpc2_reg_box_plus_kernel_config<1,
-                                             NUM_STORAGE_WORDS_BG1,
-                                             MAX_NUM_PARITY_BG1,
-                                             cuphyLDPCDecodeConfigDesc_t> kernel_config_t;
+    typedef ldpc2_reg_box_plus_kernel_config_core_split<1,
+                                                        NUM_STORAGE_WORDS_BG1_FAST_CORE,
+                                                        NUM_STORAGE_WORDS_BG1_FAST_NONCORE,
+                                                        MAX_NUM_PARITY_BG1,
+                                                        cuphyLDPCDecodeConfigDesc_t> kernel_config_t;
 
     //------------------------------------------------------------------
     // Load LLR data from global to shared memory
