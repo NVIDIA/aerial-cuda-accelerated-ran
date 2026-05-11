@@ -54,7 +54,7 @@ namespace
     [[maybe_unused]] const int NUM_STORAGE_WORDS_BG1 = 10;
     [[maybe_unused]] const int NUM_STORAGE_WORDS_BG2 = 5;
     [[maybe_unused]] const int NUM_STORAGE_WORDS_BG1_FAST_CORE    = NUM_STORAGE_WORDS_BG1;
-    [[maybe_unused]] const int NUM_STORAGE_WORDS_BG1_FAST_NONCORE = NUM_STORAGE_WORDS_BG1;
+    [[maybe_unused]] const int NUM_STORAGE_WORDS_BG1_FAST_NONCORE = 8;
 
     // APP address calculation
     // Using floating point instruction APP address calculation
