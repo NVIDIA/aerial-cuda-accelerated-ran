@@ -103,9 +103,10 @@ namespace
         static constexpr int BG              = BG_;
         static constexpr int MIN_PARITY_ROWS = 4;
 
-        typedef ldpc2::C2V_storage_t<__half, NUM_STORAGE_WORDS_CORE>    c2v_storage_core_t;
-        typedef ldpc2::C2V_storage_t<__half, NUM_STORAGE_WORDS_NONCORE> c2v_storage_noncore_t;
-        typedef TKernelParams                                            kernel_params_t;
+        static_assert(BG == 1,
+                      "Core-split fast configuration is only valid for BG1");
+
+        typedef TKernelParams kernel_params_t;
 
         typedef C2V_row_proc<__half,
                              BG,
@@ -113,12 +114,9 @@ namespace
                              app_loader,
                              app_writer> c2v_t;
 
-        typedef ldpc2::c2v_cache_register_core<BG,
-                                               MAX_PARITY_ROWS,
-                                               c2v_t,
-                                               c2v_storage_core_t,
-                                               c2v_storage_noncore_t,
-                                               kernel_params_t> c2v_cache_t;
+        typedef ldpc2::c2v_cache_register_flat_bg1<MAX_PARITY_ROWS,
+                                                   c2v_t,
+                                                   kernel_params_t> c2v_cache_t;
 
         typedef ldpc2::llr_loader_variable_batch<__half, 4, llr_op_clamp> llr_loader_t;
         typedef typename llr_loader_t::app_buf_t                          app_buf_t;
