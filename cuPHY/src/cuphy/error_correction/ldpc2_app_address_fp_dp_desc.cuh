@@ -214,8 +214,8 @@ struct app_loc_address_fp_dp_desc
             // COL_IDX_SHIFT_LOW  = ((col_idx[0] - 1) * Z + shift) * sizeof(T)   (signed, stored as full int32) (Subtracting "extra" Z)
             // COL_IDX_SHIFT_HIGH = ((col_idx[1] - 1) * Z + shift) * sizeof(T)   (signed, stored as full int32) (Subtracting "extra" Z)
             //
-            // R1 = HSET2.GE.BF(threadIdx, wrapIndex)                             (threadIdx >= wrap_index) ? : 1.0 : 0.0
-            // R2 = R0 - (R1 * Z)                                                 threadIdx + Z - COND(Z)                    (always positive, can be fp16 denormalized)
+            // R1 = HSET2.LT.BF(threadIdx, wrapIndex)                             (threadIdx < wrap_index) ? : 1.0 : 0.0
+            // R2 = (R1 * Z) + threadIdx                                          threadIdx + Z - COND(Z)                    (always positive, can be fp16 denormalized)
             // dp2a.lo.s32.s32 ADDR_0, R2, 0x00 00 00 sz, COL_IDX_SHIFT_LOW;      [col_idx * Z + shift + threadIdx - COND(Z)] * sizeof(T)
             // dp2a.hi.s32.s32 ADDR_1, R2, 0x00 sz 00 00, COL_IDX_SHIFT_HIGH; 
 
@@ -225,8 +225,8 @@ struct app_loc_address_fp_dp_desc
             const int32_t COL_IDX_SHIFT_HIGH = bg_desc.nodes[PAIR_OFFSET + i].col_Z_shift_high;
             WRAP_INDEX.u32                   = bg_desc.nodes[PAIR_OFFSET + i].wrap_index;
             
-            R1                   = hset2_bf_ge(tIdx_tIdx, WRAP_INDEX);          // R1 = HSET2.GE.BF(threadIdx, WRAP_INDEX)  (HSET2.BF instruction)
-            R2                   = hfma2(hneg2(R1), Z_Z, tIdx_Z);               // R2 = threadIdx + Z - COND(Z)
+            R1                   = hset2_bf_lt(tIdx_tIdx, WRAP_INDEX);          // R1 = HSET2.LT.BF(threadIdx, WRAP_INDEX)  (HSET2.BF instruction)
+            R2                   = hfma2(R1, Z_Z, tIdx_tIdx);                   // R2 = threadIdx + Z - COND(Z)
 
             //if((0 == CHECK_IDX) && (0 == threadIdx.x) && (0 == i))
             //{
