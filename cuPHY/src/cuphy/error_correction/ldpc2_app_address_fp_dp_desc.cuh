@@ -160,6 +160,8 @@ struct app_loc_address_fp_dp_desc
     //------------------------------------------------------------------
     // Base graph descriptor type used by this app address calculator
     typedef BG_adj_desc<BG> bg_desc_t;
+    // Z=384 packed as raw fp16x2 denormalized integer payload.
+    static constexpr uint32_t Z384_RAW_FP16X2 = (384u << 16) | 384u;
     //------------------------------------------------------------------
     // app_loc_address_fp_dp_desc()
     // Constructor using original LDPC_kernel_params struct
@@ -169,7 +171,7 @@ struct app_loc_address_fp_dp_desc
                                unsigned int              t_idx) : bg_desc(bgd),
                                                                   Z_Z(h0_h0(params.Z)),
                                                                   tIdx_tIdx(h0_h0(t_idx)),
-                                                                  tIdx_Z(h0_h0(t_idx + params.Z))
+                                                                  tIdx_Z(get_tIdx_plus_Z(tIdx_tIdx, params.Z))
     {
     }
     //------------------------------------------------------------------
@@ -181,8 +183,21 @@ struct app_loc_address_fp_dp_desc
                                unsigned int                       t_idx) : bg_desc(bgd),
                                                                            Z_Z(h0_h0(config.Z)),
                                                                            tIdx_tIdx(h0_h0(t_idx)),
-                                                                           tIdx_Z(h0_h0(t_idx + config.Z))
+                                                                           tIdx_Z(get_tIdx_plus_Z(tIdx_tIdx, config.Z))
     {
+    }
+    //------------------------------------------------------------------
+    // get_tIdx_plus_Z()
+    __device__ static
+    word_t get_tIdx_plus_Z(word_t tIdx_tIdx_in, unsigned int Z)
+    {
+        if(Z == 384u)
+        {
+            word_t tIdx_Z_out;
+            tIdx_Z_out.u32 = tIdx_tIdx_in.u32 + Z384_RAW_FP16X2;
+            return tIdx_Z_out;
+        }
+        return h0_h0(static_cast<unsigned int>(tIdx_tIdx_in.u16x2.x) + Z);
     }
     //------------------------------------------------------------------
     // generate()
