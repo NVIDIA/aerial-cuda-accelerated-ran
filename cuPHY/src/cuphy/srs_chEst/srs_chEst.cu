@@ -1290,23 +1290,28 @@ inline __device__ void srsFilterMultiply(
         const __half2 *w = sh_W_matrix + scIdx*nSrsScBlock;
         const __half2* foccBase = sh_focc_table + foccIdx * (FOCC_LENGTH + 1);
 
-        auto est  = half2{0, 0};
+        // FP32 accumulation: live fronthaul IQ (|IQ|~500+) overflows __half2 in the
+        // 24-tap MMSE filter, producing NaN in sh_Hest and zero chEstNormToL2 to L2.
+        float2 est_f = make_float2(0.f, 0.f);
         //#pragma unroll
         for(int inputScIdx = 0; inputScIdx < nSrsScBlock; inputScIdx++)
         {
-            __half2 inputSignal = *srs;
+            float2 inputSignal = __half22float2(*srs);
             if(correctDelayOffsetFlag == 1)
             {
-                __half2 phase_conj = sh_phaseLUT[portIdx * (nSrsScBlock + 1) + inputScIdx];
-                inputSignal = complex_mul(phase_conj, inputSignal);
+                float2 phase_conj = __half22float2(sh_phaseLUT[portIdx * (nSrsScBlock + 1) + inputScIdx]);
+                inputSignal       = complex_mul(phase_conj, inputSignal);
             }
 
-            const auto focc = foccBase[inputScIdx % FOCC_LENGTH];
-            est = __hcmadd(complex_conjmul(*w, focc), inputSignal, est);//__hadd2(est, complex_mul(complex_conjmul(*w, focc), inputSignal));
+            const float2 w_f    = __half22float2(*w);
+            const float2 focc_f = __half22float2(foccBase[inputScIdx % FOCC_LENGTH]);
+            const float2 term   = complex_mul(complex_conjmul(w_f, focc_f), inputSignal);
+            est_f.x += term.x;
+            est_f.y += term.y;
             w++;
             srs++;
         }
-        sh_Hest[i] = est;
+        sh_Hest[i] = __float22half2_rn(est_f);
     }
 }
 
@@ -1492,8 +1497,8 @@ __device__ __forceinline__ void srsChEstKernelInner(srsChEstStatDescr_t* pStatDe
    float(*sh_avgSignalEnergySc)[nSrsScBlock]         = reinterpret_cast<float(*)[nSrsScBlock]>(&sh_avgSignalEnergyPrb[nAntPorts]); // size: [nAntPorts][nSrsScBlock]
    float*    sh_avgSignalEnergy    = reinterpret_cast<float*>(&sh_avgSignalEnergySc[nAntPorts]);            // size: [nAntPorts]
    uint32_t* sh_ueBlockCntr        = reinterpret_cast<uint32_t*>(&sh_avgSignalEnergy[nAntPorts]);           // size: [nAntPorts]
-   __half2*  sh_tile_avgScCorr     = reinterpret_cast<__half2*>(&sh_ueBlockCntr[nAntPorts]);                // size: [number_of_warps_in_CTA * nAntPorts]
-   __half2*  sh_phaseTable         = &sh_tile_avgScCorr[NUM_WARPS_PER_CTA * nAntPorts];                     // size: [13 * nSrsScBlock] (upper limit for [(n_SRS_cs_max+1) * nSrsScBlock])
+   float2*   sh_tile_avgScCorr     = reinterpret_cast<float2*>(&sh_ueBlockCntr[nAntPorts]);                 // size: [NUM_WARPS_PER_CTA * nAntPorts]
+   __half2*  sh_phaseTable         = reinterpret_cast<__half2*>(&sh_tile_avgScCorr[NUM_WARPS_PER_CTA * nAntPorts]); // size: [13 * nSrsScBlock] (upper limit for [(n_SRS_cs_max+1) * nSrsScBlock])
    __half2*  sh_phaseTableEnd      = sh_phaseTable + (nSrsScBlock + 1) * 12;                                // end marker for sh_phaseTable
 
    // === Section 3: Dynamically-sized buffers (using byte pointer arithmetic) ===
@@ -1652,10 +1657,11 @@ __device__ __forceinline__ void srsChEstKernelInner(srsChEstStatDescr_t* pStatDe
 
    //=============================================================================
    // STEP 3: estimate delay phase ramp
-   __half2 sumScCorr[nAntPorts];
+   // FP32 accumulation: |H|~500 from live BFP9 IQ makes |est0*conj(est1)|~2.5e5, overflowing __half2.
+   float2 sumScCorr_f[nAntPorts];
    for(int antPortIdx = 0; antPortIdx < nAntPorts; ++antPortIdx)
    {
-        sumScCorr[antPortIdx] = __float2half2_rn(0.f);
+        sumScCorr_f[antPortIdx] = make_float2(0.f, 0.f);
    }
 
    max_loop_iters = nRxAntSrs * (nSrsScBlock - 1);
@@ -1666,54 +1672,67 @@ __device__ __forceinline__ void srsChEstKernelInner(srsChEstStatDescr_t* pStatDe
 
        for(int portIdx = 0; portIdx < nAntPorts; ++portIdx)
        {
-            auto est0          = sh_Hest[portIdx + nAntPorts * scIdx + nAntPorts * nSrsScBlock * antIdx];
-            auto est1          = sh_Hest[portIdx + nAntPorts * (scIdx + 1) + nAntPorts * nSrsScBlock * antIdx];
-            sumScCorr[portIdx] = __hadd2(sumScCorr[portIdx], complex_conjmul(est1, est0));
+            const float2 est0 = __half22float2(sh_Hest[portIdx + nAntPorts * scIdx + nAntPorts * nSrsScBlock * antIdx]);
+            const float2 est1 = __half22float2(sh_Hest[portIdx + nAntPorts * (scIdx + 1) + nAntPorts * nSrsScBlock * antIdx]);
+            const float2 term = complex_conjmul(est1, est0);
+            sumScCorr_f[portIdx].x += term.x;
+            sumScCorr_f[portIdx].y += term.y;
        }
    }
 
-   __half2* tile_avgScCorr = sh_tile_avgScCorr + (tile.meta_group_rank() * nAntPorts);
-   __half2  invScale       = __half2half2(__float2half(__frcp_rn(float(nRxAntSrs * (nSrsScBlock - 1)))));
+   // Reduce/average in FP32; |sumScCorr| can be O(|H|^2 * nAnt) >> fp16 range before averaging.
+   const float invScCorrScale = __frcp_rn(float(nRxAntSrs * (nSrsScBlock - 1)));
+   const int   tileScCorrBase = tile.meta_group_rank() * nAntPorts;
    for(int portIdx = 0; portIdx < nAntPorts; ++portIdx)
    {
-       auto tmp = cg::reduce(tile, sumScCorr[portIdx], cg::plus<__half2>());
+       const float red_x = cg::reduce(tile, sumScCorr_f[portIdx].x, cg::plus<float>());
+       const float red_y = cg::reduce(tile, sumScCorr_f[portIdx].y, cg::plus<float>());
        if(tile.thread_rank() == 0)
        {
-           tile_avgScCorr[portIdx] = __hmul2(tmp, invScale);
+           sh_tile_avgScCorr[tileScCorrBase + portIdx] = make_float2(red_x * invScCorrScale,
+                                                                      red_y * invScCorrScale);
        }
    }
 
-   if (tile.thread_rank() == 0)
+   // Cross-warp reduction: one thread accumulates all warps' per-port sums, then computes
+   // sh_phaseRamp once per UE from the full block-wide correlation. Each warp wrote its
+   // disjoint iteration subset to sh_tile_avgScCorr; summing them recovers the full average.
+   __syncthreads();
+   if (tid == 0)
    {
        uint8_t portIdx = 0;
        for(int i = 0; i < nUes; ++i)
        {
-           uint16_t ueIdx       = sh_ueIdxs[i];
-           uint8_t  nUePorts    = pDynDescr->ueDescrs[ueIdx].nPortsPerComb;
-           sh_nUePorts[i]       = nUePorts;  // Cache for reuse in STEP 6+
-           __half2  ueAvgScCorr = {0, 0};
-           invScale             = __half2half2(__float2half(__frcp_rn(float(nUePorts))));
+           uint16_t ueIdx    = sh_ueIdxs[i];
+           uint8_t  nUePorts = pDynDescr->ueDescrs[ueIdx].nPortsPerComb;
+           sh_nUePorts[i]    = nUePorts;
+           float2   ueSum_f  = make_float2(0.f, 0.f);
 
-           // average SC corr for ports belonging to this user:
-           for(int uePortIdx = 0; uePortIdx < nUePorts; ++uePortIdx)
+           for(int warpIdx = 0; warpIdx < NUM_WARPS_PER_CTA; ++warpIdx)
            {
-               ueAvgScCorr += tile_avgScCorr[portIdx];
-               portIdx++;
+               for(int uePortIdx = 0; uePortIdx < nUePorts; ++uePortIdx)
+               {
+                   const float2 v = sh_tile_avgScCorr[warpIdx * nAntPorts + portIdx + uePortIdx];
+                   ueSum_f.x += v.x;
+                   ueSum_f.y += v.y;
+               }
            }
-           ueAvgScCorr = __hmul2(ueAvgScCorr, invScale);
+           ueSum_f.x *= __frcp_rn(float(nUePorts));
+           ueSum_f.y *= __frcp_rn(float(nUePorts));
 
-           atomicAdd(&sh_avgScCorr[i], ueAvgScCorr);
+           sh_phaseRamp[i] = atan2f(ueSum_f.y, ueSum_f.x) / combSize;
+
+           // Unit-normalize before storing to sh_avgScCorr: keeps the FP16 magnitude safe
+           // across blocks while preserving phase for atan2f-based ToA computation.
+           const float mag = hypotf(ueSum_f.x, ueSum_f.y);
+           float2 ueUnit = ueSum_f;
+           if(mag > 0.f) { ueUnit.x /= mag; ueUnit.y /= mag; }
+           sh_avgScCorr[i] = __float22half2_rn(ueUnit);
+
+           portIdx += nUePorts;
        }
    }
-    __syncthreads();
-
-    if(tid < nUes)
-    {
-        __half2 avgScCorr = sh_avgScCorr[tid];
-        float   phaseRamp = atanf(__half2float(avgScCorr.y) / __half2float(avgScCorr.x)) / combSize;
-        sh_phaseRamp[tid] = phaseRamp;
-    }
-    __syncthreads();
+   __syncthreads();
 
 //===================================================================================
 //    STEP 5: remove cyclic shifts and apply narrow filter to estimate channel
@@ -1768,7 +1787,7 @@ __device__ __forceinline__ void srsChEstKernelInner(srsChEstStatDescr_t* pStatDe
          int antIdx = i / nSrsScBlock;
 
          const int scIdxModFoccLength = scIdx % FOCC_LENGTH;
-         __half2   scRxEst{0, 0};
+         float2    scRxEst_f = make_float2(0.f, 0.f);
          uint8_t   portIdx = 0;
 
          for(int j = 0; j < nUes; ++j)
@@ -1777,30 +1796,31 @@ __device__ __forceinline__ void srsChEstKernelInner(srsChEstStatDescr_t* pStatDe
             float    sigy     = 0.f;
 
             int    scIdx_global = scIdx * combSize;
-            float2 phase = {1.f, 0.f};
+            float2 phase = make_float2(1.f, 0.f);
             if(enableDelayOffsetCorrection == 1)
             {
                 __sincosf(sh_phaseRamp[j] * scIdx_global, &phase.y, &phase.x);
             }
-            __half2 phase_half = __float22half2_rn(phase);
 
             for(int uePortIdx = 0; uePortIdx < nUePorts; ++uePortIdx)
             {
-                auto       foccIdx = sh_portToFoccMap[portIdx];
-                const auto focc    = sh_focc_table[foccIdx * (FOCC_LENGTH + 1) + scIdxModFoccLength];
-                auto       est     = sh_Hest[portIdx + nAntPorts * scIdx + nAntPorts * nSrsScBlock * antIdx];
-                auto       est2    = __hmul2(est, est);
-                sigy              += __half2float(est2.x + est2.y);
+                const int    foccIdx = sh_portToFoccMap[portIdx];
+                const float2 est_f   = __half22float2(sh_Hest[portIdx + nAntPorts * scIdx + nAntPorts * nSrsScBlock * antIdx]);
+                sigy += fmaf(est_f.x, est_f.x, est_f.y * est_f.y);
 
-                est     = complex_mul(phase_half, est);
-                scRxEst = __hcmadd(focc, est, scRxEst); //__hadd2(scRxEst, complex_mul(focc, est));
+                const float2 focc_f  = __half22float2(sh_focc_table[foccIdx * (FOCC_LENGTH + 1) + scIdxModFoccLength]);
+                const float2 est_ph  = complex_mul(phase, est_f);
+                const float2 rxTerm  = complex_mul(focc_f, est_ph);
+                scRxEst_f.x += rxTerm.x;
+                scRxEst_f.y += rxTerm.y;
                 portIdx++;
             }
             sigEnergy[j] += sigy;
          }
-         __half2 noise  = __hsub2(scRxEst, sh_rxSrs[i]);
-         noiseEnergy   += fmaf(__half2float(noise.x), __half2float(noise.x),
-                               __half2float(noise.y) * __half2float(noise.y));
+         const float2 rx_f    = __half22float2(sh_rxSrs[i]);
+         const float  noise_x = scRxEst_f.x - rx_f.x;
+         const float  noise_y = scRxEst_f.y - rx_f.y;
+         noiseEnergy += fmaf(noise_x, noise_x, noise_y * noise_y);
       }
 
       int numGroups = nSrsScBlock / (prgSize * nCombScPerPrb);
@@ -1970,17 +1990,18 @@ __device__ __forceinline__ void srsChEstKernelInner(srsChEstStatDescr_t* pStatDe
    {
        int antIdx = i / n_SRS_cs_max;
        int csIdx  = i - antIdx * n_SRS_cs_max;
-       __half2 accSumRxCs {0, 0};
+       float2 accSumRxCs_f = make_float2(0.f, 0.f);
 
 //#pragma unroll
        for(int scIdx = 0; scIdx < nSrsScBlock; scIdx ++)
        {
-           __half2 phase_rotation = sh_phaseTable[csIdx * (nSrsScBlock + 1) + scIdx];
-           __half2 rxSrs  = sh_rxSrs[antIdx * nSrsScBlock + scIdx];
-           accSumRxCs = __hcmadd(rxSrs, phase_rotation, accSumRxCs);
+           const float2 phase_rotation = __half22float2(sh_phaseTable[csIdx * (nSrsScBlock + 1) + scIdx]);
+           const float2 rxSrs          = __half22float2(sh_rxSrs[antIdx * nSrsScBlock + scIdx]);
+           const float2 term           = complex_mul(rxSrs, phase_rotation);
+           accSumRxCs_f.x += term.x;
+           accSumRxCs_f.y += term.y;
        }
-       float2 accSumRxCsFloat = __half22float2(accSumRxCs);
-       float  accSumRxCsAbs2  = fmaf(accSumRxCsFloat.x, accSumRxCsFloat.x, accSumRxCsFloat.y * accSumRxCsFloat.y);
+       float  accSumRxCsAbs2  = fmaf(accSumRxCs_f.x, accSumRxCs_f.x, accSumRxCs_f.y * accSumRxCs_f.y);
 
        // sum over antennas and separate cyclic shifts in use and not used
         uint16_t ueIdxWithinBlock = csIdx2UeIdxLut[csIdx];
@@ -3423,7 +3444,7 @@ void  srsChEst::kernelSelect(srsChEstDynDescr_t*      pCpuDynDesc,
                                                  (max_nPorts * max_nSrsSc) * sizeof(float) +                             // sh_avgSignalEnergySc
                                                  max_nPorts * sizeof(float) +                                            // sh_avgSignalEnergy
                                                  max_nPorts * sizeof(uint32_t) +                                         // sh_ueBlockCntr
-                                                 max_nPorts * (SRS_CHEST_BLOCK_SZ / 32/*TILE_SIZE*/) * sizeof(__half2) + // sh_tile_avgScCorr
+                                                 max_nPorts * (SRS_CHEST_BLOCK_SZ / 32/*TILE_SIZE*/) * sizeof(float2) +  // sh_tile_avgScCorr
                                                  (max_nSrsScBlock + 1) * 12 * sizeof(__half2) +                          // sh_phaseTable- used for sin/cos LUT in srsFilterMultiply and step 7; the LUT size in srsFilterMultiply is larger or equal to LUT in step 7;
                                                  2 * sizeof(float) +                                                     // sh_avgNoiseEnergy, sh_tmpWidebandCsCorrNotUse (moved to dynamic shared)
                                                  12 * sizeof(uint16_t) +                                                 // csIdx2UeIdxLut (moved to dynamic shared)
