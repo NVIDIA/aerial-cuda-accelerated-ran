@@ -264,11 +264,13 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 		dbClient = new ch::Client (ch::ClientOptions().SetHost(host));
 		fhClient = new ch::Client (ch::ClientOptions().SetHost(host));
 		hestClient = new ch::Client (ch::ClientOptions().SetHost(host));
+		bfwClient = new ch::Client (ch::ClientOptions().SetHost(host));
 		if (dropTables) {
 			NVLOGC_FMT(TAG_DATALAKE,"Dropping tables per datalake_drop_tables");
 			dbClient->Execute("DROP TABLE IF EXISTS fapi");
 			fhClient->Execute("DROP TABLE IF EXISTS fh");
 			hestClient->Execute("DROP TABLE IF EXISTS hest");
+			bfwClient->Execute("DROP TABLE IF EXISTS dyn_bfw_weights");
 		}
 		if (engine != "Memory") {
 			NVLOGC_FMT(TAG_DATALAKE,"Creating tables using datalake_engine: {}",engine);
@@ -358,6 +360,24 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 		) \
 		ENGINE = " + engine + ";";
 
+		// SRS-derived dynamic DL beamforming weights, per UE (rnti). bfwIQ is the
+		// decompressed Q15 weight vector, I/Q interleaved, ordered [layer][prg][antenna].
+		std::string createTableBfw = "CREATE TABLE IF NOT EXISTS dyn_bfw_weights ( \
+			TsTaiNs			DateTime64(9)	NOT NULL, \
+			SFN				UInt16	NOT NULL, \
+			Slot			UInt16	NOT NULL, \
+			CellId			UInt16	NOT NULL, \
+			rnti			UInt16	NOT NULL, \
+			beamId			UInt16	NOT NULL, \
+			nGnbAnt			UInt8	NOT NULL, \
+			nPrg			UInt16	NOT NULL, \
+			prgSize			UInt16	NOT NULL, \
+			bfwIqWidth		UInt8	NOT NULL, \
+			nLayers			UInt8	NOT NULL, \
+			bfwIQ			Array(Float32)	NOT NULL \
+			) \
+			ENGINE = " + engine + ";";
+
 		// Otherwise the log is terrible
 		std::regex tabRegex("\t+");
 		NVLOGD_FMT(TAG_DATALAKE,"Creating table fapi: {}", std::regex_replace(createTableFapi, tabRegex, " "));
@@ -367,9 +387,91 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 		dbClient->Execute(createTableFapi);
 		fhClient->Execute(createTableFh);
 		hestClient->Execute(createTableHest);
+
+
+		bfwClient->Execute(createTableBfw);
 		initDone = true;
 	}
 	notifyTime = std::chrono::high_resolution_clock::now();
+}
+
+// Dump SRS-derived dynamic DL BFW weights for one UE into dyn_bfw_weights.
+// Called from the RT FAPI/slot-command path: it only copies the raw BFP block
+// here, then defers BFP->Float32 decompression + ClickHouse insert to the worker
+// thread pool so the RT path stays cheap.
+void DataLake::notifyBfw(uint16_t cellId, uint16_t rnti, uint16_t sfn, uint16_t slot,
+	uint16_t beamId, uint8_t nGnbAnt, uint16_t nPrg, uint16_t prgSize,
+	uint8_t bfwIqWidth, uint8_t nLayers, const uint8_t* bfp, uint32_t bfpLen)
+{
+	if (bfwClient == nullptr || bfp == nullptr || bfpLen == 0 || nGnbAnt == 0 || bfwIqWidth == 0)
+		return;
+
+	// Per-bundle layout: 1 exponent byte + (2*nGnbAnt*bfwIqWidth/8) packed mantissa bytes.
+	const uint32_t mantBytes  = (uint32_t)(2 * nGnbAnt * bfwIqWidth) / 8;
+	const uint32_t bundleBytes = mantBytes + 1;
+	const uint32_t nBundles   = (uint32_t)nPrg * (uint32_t)(nLayers ? nLayers : 1);
+	if (bundleBytes == 0 || bfpLen < nBundles * bundleBytes)
+		return;
+
+	// Copy the raw BFP off the RT path; decode + insert on a worker thread.
+	std::vector<uint8_t> raw(bfp, bfp + nBundles * bundleBytes);
+	uint64_t tsTaiNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+		std::chrono::system_clock::now().time_since_epoch()).count();
+
+	submitTask([=, this, raw = std::move(raw)]() {
+		// MSB-first bit reader over the packed mantissa stream.
+		auto getbits = [](const uint8_t* b, int pos, int n) -> int32_t {
+			int32_t v = 0;
+			for (int k = 0; k < n; ++k) { int p = pos + k; v = (v << 1) | ((b[p >> 3] >> (7 - (p & 7))) & 1); }
+			return v;
+		};
+		const int iqw = bfwIqWidth;
+		auto fp32 = std::make_shared<ch::ColumnFloat32>();
+		auto offsets = std::make_shared<ch::ColumnUInt64>();
+		uint64_t nVals = 0;
+		for (uint32_t bnd = 0; bnd < nBundles; ++bnd) {
+			const uint8_t* base = raw.data() + (size_t)bnd * bundleBytes;
+			int32_t shift = base[0] & 0xFF;          // per-bundle BFP exponent
+			const uint8_t* mant = base + 1;
+			for (uint32_t a = 0; a < nGnbAnt; ++a) {
+				int ioff = (int)a * 2 * iqw, qoff = ioff + iqw;
+				// raw compbits -> sign-extend -> apply exponent (matches bfw_decompress_blockFP)
+				int32_t ri = (getbits(mant, ioff, iqw) << (32 - iqw)) >> (32 - iqw - shift);
+				int32_t rq = (getbits(mant, qoff, iqw) << (32 - iqw)) >> (32 - iqw - shift);
+				fp32->Append((float)ri / 32768.0f);  // Q15 fraction (matches on-wire bfwI/bfwQ)
+				fp32->Append((float)rq / 32768.0f);
+				nVals += 2;
+			}
+		}
+		offsets->Append(nVals);  // single row: Array offset = total element count
+
+		auto col_u64 = [](uint64_t v){ auto c = std::make_shared<ch::ColumnUInt64>(); c->Append(v); return c; };
+		auto col_u16 = [](uint16_t v){ auto c = std::make_shared<ch::ColumnUInt16>(); c->Append(v); return c; };
+		auto col_u8  = [](uint8_t v){ auto c = std::make_shared<ch::ColumnUInt8>(); c->Append(v); return c; };
+
+		auto tsCol = std::make_shared<ch::ColumnDateTime64>(9);
+		tsCol->Append((int64_t)tsTaiNs);
+
+		ch::Block block;
+		block.AppendColumn("TsTaiNs",    tsCol);
+		block.AppendColumn("SFN",        col_u16(sfn));
+		block.AppendColumn("Slot",       col_u16(slot));
+		block.AppendColumn("CellId",     col_u16(cellId));
+		block.AppendColumn("rnti",       col_u16(rnti));
+		block.AppendColumn("beamId",     col_u16(beamId));
+		block.AppendColumn("nGnbAnt",    col_u8(nGnbAnt));
+		block.AppendColumn("nPrg",       col_u16(nPrg));
+		block.AppendColumn("prgSize",    col_u16(prgSize));
+		block.AppendColumn("bfwIqWidth", col_u8(bfwIqWidth));
+		block.AppendColumn("nLayers",    col_u8(nLayers ? nLayers : 1));
+		block.AppendColumn("bfwIQ",      std::make_shared<ch::ColumnArrayT<ch::ColumnFloat32>>(fp32, offsets));
+		try {
+			std::lock_guard<std::mutex> lk(bfwClientMutex);
+			bfwClient->Insert("dyn_bfw_weights", block);
+		} catch (const std::exception& e) {
+			NVLOGE_FMT(TAG_DATALAKE, AERIAL_CONFIG_EVENT, "notifyBfw insert failed: {}", e.what());
+		}
+	});
 }
 
 inline uint64_t sfn_to_tai(int sfn, int slot, uint64_t approx_tai_time_ns, int64_t gps_alpha, int64_t gps_beta, int mu)

@@ -35,6 +35,7 @@
 #include "gpudevice.hpp"
 #include "time.hpp"
 #include "cuphydriver_api.hpp"
+#include "data_lake.hpp"   // DataLake::notifyBfw (for l1_datalake_notify_bfw)
 #include "exceptions.hpp"
 #include "nvlog.hpp"
 #include "cuphyoam.hpp"
@@ -3112,7 +3113,21 @@ int l1_cv_mem_bank_get_buffer_state(phydriver_handle pdh,uint32_t cell_id, uint1
     }
     *srs_chest_buff_state = cv->getSrsChestBufferState(cell_id, buffer_idx);
     return 0;
-    
+
+}
+
+int l1_datalake_notify_bfw(phydriver_handle pdh, uint16_t cell_id, uint16_t rnti, uint16_t sfn, uint16_t slot,
+                           uint16_t beam_id, uint8_t n_gnb_ant, uint16_t n_prg, uint16_t prg_size,
+                           uint8_t bfw_iq_width, uint8_t n_layers, const uint8_t* bfp, uint32_t bfp_len)
+{
+    PhyDriverCtx* pdctx = StaticConversion<PhyDriverCtx>(pdh).get();
+    DataLake* dl = pdctx->getDataLake();
+    if(dl == nullptr)
+    {
+        return -1;  // data lake disabled
+    }
+    dl->notifyBfw(cell_id, rnti, sfn, slot, beam_id, n_gnb_ant, n_prg, prg_size, bfw_iq_width, n_layers, bfp, bfp_len);
+    return 0;
 }
 
 int l1_cv_mem_bank_update_buffer_usage(phydriver_handle pdh,uint32_t cell_id, uint16_t rnti, uint16_t buffer_idx, uint32_t usage)

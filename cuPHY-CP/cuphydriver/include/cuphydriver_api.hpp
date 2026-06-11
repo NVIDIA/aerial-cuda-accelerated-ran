@@ -1236,6 +1236,16 @@ int l1_cv_mem_bank_update_buffer_state(phydriver_handle pdh, uint32_t cell_id, u
 int l1_cv_mem_bank_get_buffer_state(phydriver_handle pdh, uint32_t cell_id, uint16_t buffer_idx, slot_command_api::srsChestBuffState *srs_chest_buff_state);
 
 /******************************************************************/ /**
+ * Dump SRS-derived dynamic DL beamforming weights for one UE (rnti) into the
+ * data lake (dyn_bfw_weights table). bfp points at the per-bundle BFP coeff
+ * block (exponent byte + packed I/Q mantissas), nPrg*nLayers bundles. No-op if
+ * the data lake is disabled. Returns 0 on success, -1 if no data lake.
+ *//*******************************************************************/
+int l1_datalake_notify_bfw(phydriver_handle pdh, uint16_t cell_id, uint16_t rnti, uint16_t sfn, uint16_t slot,
+                           uint16_t beam_id, uint8_t n_gnb_ant, uint16_t n_prg, uint16_t prg_size,
+                           uint8_t bfw_iq_width, uint8_t n_layers, const uint8_t* bfp, uint32_t bfp_len);
+
+/******************************************************************/ /**
  * @brief Update SRS channel estimate buffer usage counter
  *
  * Updates the reference/usage count for an SRS channel estimate buffer.
