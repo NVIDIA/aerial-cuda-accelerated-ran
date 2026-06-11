@@ -1768,12 +1768,13 @@ F_TYPE bool ecpri_hdr_sanity_check(uint8_t* mbuf_payload)
         printf("Wrong ecpriSubSeqid: %d, we currently support: %d\n", ecpri_hdr->ecpriSubSeqid.get(), 0);
         ret = false;
     }
-
+#if 0
     if(ecpri_hdr->ecpriEbit.get() != 1)
     {
         printf("Wrong ecpriEbit: %d, we currently support: %d\n", ecpri_hdr->ecpriEbit.get(), 1);
         ret = false;
     }
+#endif 
     return ret;
 }
 

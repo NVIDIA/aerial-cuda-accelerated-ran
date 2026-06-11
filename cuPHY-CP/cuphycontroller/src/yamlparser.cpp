@@ -17,6 +17,7 @@
 
 #include "yamlparser.hpp"
 #include "cuphydriver.hpp"
+#include <algorithm>
 #include <sstream>
 #include <fstream>
 #include "app_config.hpp"
@@ -405,39 +406,106 @@ int YamlParser::parse_single_cell(yaml::node cell,std::string *p_unique_nic_info
 
         parse_eth_addr(src_eth_addr_str, mplane_cfg.src_eth_addr);
 
-        // Validate destination MAC address format
-        std::string dst_eth_addr_str = static_cast<std::string>(cell[YAML_PARAM_CELL_DST_MAC_ADDR]);
-        
-        if (!is_valid_mac_address(dst_eth_addr_str)) {
-            NVLOGE_FMT(TAG, AERIAL_CONFIG_EVENT, "Invalid destination MAC address format found for cell id {} (YAML key: {})", mplane_cfg.mplane_id, YAML_PARAM_CELL_DST_MAC_ADDR);
-            return -1;
-        }
-        if (phydriver_config.ue_mode == 0 && cell_configs.size() < phydriver_config.cell_group_num)
-        {
-            if (dst_mac_set.count(dst_eth_addr_str))
-            {
-                NVLOGE_FMT(TAG, AERIAL_CONFIG_EVENT, "Duplicate destination MAC address '{}' detected for cell id {} (YAML key: {}). Each cell must have a unique destination MAC address.", dst_eth_addr_str, mplane_cfg.mplane_id, YAML_PARAM_CELL_DST_MAC_ADDR);
-                return -1;
-            }
-            dst_mac_set.insert(dst_eth_addr_str);
-        }
-
-        parse_eth_addr(dst_eth_addr_str, mplane_cfg.dst_eth_addr);
-
         // cell_cfg.vlan_tci = static_cast<uint16_t>(cell[YAML_PARAM_CELL_VLAN]);
         mplane_cfg.vlan_tci = (static_cast<uint16_t>(cell[YAML_PARAM_CELL_VLAN]) & 0xfff) |
                 (static_cast<uint16_t>(cell[YAML_PARAM_CELL_PCP]) << 13);
 
         mplane_cfg.nic_cfg.txq_count_uplane = (uint8_t)static_cast<uint16_t>(cell[YAML_PARAM_CELL_TXQ_COUNT_UPLANE]);
 
-        parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_SSB_PBCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PBCH}, mplane_cfg);
-        parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_PDCCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PDCCH_DL, slot_command_api::channel_type::PDCCH_UL}, mplane_cfg);
-        parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_PDSCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PDSCH, slot_command_api::channel_type::PDSCH_CSIRS}, mplane_cfg);
-        parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_CSIRS], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::CSI_RS}, mplane_cfg);
-        parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_PUSCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PUSCH}, mplane_cfg);
-        parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_PUCCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PUCCH}, mplane_cfg);
-        parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_SRS], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::SRS}, mplane_cfg);
-        parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_PRACH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PRACH}, mplane_cfg);
+        bool has_destinations = cell.has_key(YAML_PARAM_CELL_DESTINATIONS);
+        bool has_legacy_dst = cell.has_key(YAML_PARAM_CELL_DST_MAC_ADDR);
+
+        if (!has_destinations && !has_legacy_dst) {
+            NVLOGE_FMT(TAG, AERIAL_CONFIG_EVENT,
+                "Cell id {} must have either 'destinations' or 'dst_mac_addr'. "
+                "Use 'destinations' for multi-destination routing, or 'dst_mac_addr' for single destination.",
+                mplane_cfg.mplane_id);
+            return -1;
+        }
+
+        if (has_destinations)
+        {
+            yaml::node dests_node = cell[YAML_PARAM_CELL_DESTINATIONS];
+            for (size_t d = 0; d < dests_node.length(); ++d)
+            {
+                cell_mplane_destination dest_cfg{};
+                if (!dests_node[d].has_key(YAML_PARAM_CELL_DST_MAC_ADDR)) {
+                    NVLOGE_FMT(TAG, AERIAL_CONFIG_EVENT,
+                        "Destination entry [{}] for cell id {} is missing required key 'dst_mac_addr'",
+                        d, mplane_cfg.mplane_id);
+                    return -1;
+                }
+                std::string dst_eth_addr_str = static_cast<std::string>(dests_node[d][YAML_PARAM_CELL_DST_MAC_ADDR]);
+                if (!is_valid_mac_address(dst_eth_addr_str)) {
+                    NVLOGE_FMT(TAG, AERIAL_CONFIG_EVENT, "Invalid destination MAC address format in destinations[{}] for cell id {} (YAML key: {})", d, mplane_cfg.mplane_id, YAML_PARAM_CELL_DST_MAC_ADDR);
+                    return -1;
+                }
+                if (phydriver_config.ue_mode == 0 && cell_configs.size() < phydriver_config.cell_group_num)
+                {
+                    if (dst_mac_set.count(dst_eth_addr_str))
+                    {
+                        NVLOGE_FMT(TAG, AERIAL_CONFIG_EVENT, "Duplicate destination MAC address '{}' in destinations[{}] for cell id {}", dst_eth_addr_str, d, mplane_cfg.mplane_id);
+                        return -1;
+                    }
+                    dst_mac_set.insert(dst_eth_addr_str);
+                }
+                parse_eth_addr(dst_eth_addr_str, dest_cfg.dst_eth_addr);
+
+                parse_eAxC_to_beam_map(dests_node[d][YAML_PARAM_CELL_EAXC_ID_SSB_PBCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PBCH}, dest_cfg);
+                parse_eAxC_to_beam_map(dests_node[d][YAML_PARAM_CELL_EAXC_ID_PDCCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PDCCH_DL, slot_command_api::channel_type::PDCCH_UL}, dest_cfg);
+                parse_eAxC_to_beam_map(dests_node[d][YAML_PARAM_CELL_EAXC_ID_PDSCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PDSCH, slot_command_api::channel_type::PDSCH_CSIRS}, dest_cfg);
+                parse_eAxC_to_beam_map(dests_node[d][YAML_PARAM_CELL_EAXC_ID_CSIRS], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::CSI_RS}, dest_cfg);
+                parse_eAxC_to_beam_map(dests_node[d][YAML_PARAM_CELL_EAXC_ID_PUSCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PUSCH}, dest_cfg);
+                parse_eAxC_to_beam_map(dests_node[d][YAML_PARAM_CELL_EAXC_ID_PUCCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PUCCH}, dest_cfg);
+                parse_eAxC_to_beam_map(dests_node[d][YAML_PARAM_CELL_EAXC_ID_SRS], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::SRS}, dest_cfg);
+                parse_eAxC_to_beam_map(dests_node[d][YAML_PARAM_CELL_EAXC_ID_PRACH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PRACH}, dest_cfg);
+
+                mplane_cfg.destinations.push_back(dest_cfg);
+
+                for (size_t ch = 0; ch < slot_command_api::channel_type::CHANNEL_MAX; ++ch)
+                {
+                    for (auto eaxc : dest_cfg.eAxC_ids[ch])
+                    {
+                        if (std::find(mplane_cfg.eAxC_ids[ch].begin(), mplane_cfg.eAxC_ids[ch].end(), eaxc) == mplane_cfg.eAxC_ids[ch].end())
+                        {
+                            mplane_cfg.eAxC_ids[ch].push_back(eaxc);
+                        }
+                    }
+                }
+            }
+            if (mplane_cfg.destinations.empty()) {
+                NVLOGE_FMT(TAG, AERIAL_CONFIG_EVENT, "destinations list is empty for cell id {}", mplane_cfg.mplane_id);
+                return -1;
+            }
+            mplane_cfg.dst_eth_addr = mplane_cfg.destinations[0].dst_eth_addr;
+        }
+        else
+        {
+            std::string dst_eth_addr_str = static_cast<std::string>(cell[YAML_PARAM_CELL_DST_MAC_ADDR]);
+            if (!is_valid_mac_address(dst_eth_addr_str)) {
+                NVLOGE_FMT(TAG, AERIAL_CONFIG_EVENT, "Invalid destination MAC address format found for cell id {} (YAML key: {})", mplane_cfg.mplane_id, YAML_PARAM_CELL_DST_MAC_ADDR);
+                return -1;
+            }
+            if (phydriver_config.ue_mode == 0 && cell_configs.size() < phydriver_config.cell_group_num)
+            {
+                if (dst_mac_set.count(dst_eth_addr_str))
+                {
+                    NVLOGE_FMT(TAG, AERIAL_CONFIG_EVENT, "Duplicate destination MAC address '{}' detected for cell id {} (YAML key: {}). Each cell must have a unique destination MAC address.", dst_eth_addr_str, mplane_cfg.mplane_id, YAML_PARAM_CELL_DST_MAC_ADDR);
+                    return -1;
+                }
+                dst_mac_set.insert(dst_eth_addr_str);
+            }
+            parse_eth_addr(dst_eth_addr_str, mplane_cfg.dst_eth_addr);
+
+            parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_SSB_PBCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PBCH}, mplane_cfg);
+            parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_PDCCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PDCCH_DL, slot_command_api::channel_type::PDCCH_UL}, mplane_cfg);
+            parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_PDSCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PDSCH, slot_command_api::channel_type::PDSCH_CSIRS}, mplane_cfg);
+            parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_CSIRS], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::CSI_RS}, mplane_cfg);
+            parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_PUSCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PUSCH}, mplane_cfg);
+            parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_PUCCH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PUCCH}, mplane_cfg);
+            parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_SRS], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::SRS}, mplane_cfg);
+            parse_eAxC_to_beam_map(cell[YAML_PARAM_CELL_EAXC_ID_PRACH], std::vector<slot_command_api::channel_type>{slot_command_api::channel_type::PRACH}, mplane_cfg);
+        }
 
         char pusch_tv_full_path[MAX_PATH_LEN];
         char srs_tv_full_path[MAX_PATH_LEN];
@@ -613,6 +681,20 @@ int YamlParser::parse_eAxC_to_beam_map(yaml::node node, const std::vector<slot_c
         for (auto channel : channels)
         {
             mplane_cfg.eAxC_ids[channel].push_back(eAxC_id);
+        }
+    }
+
+    return 0;
+}
+
+int YamlParser::parse_eAxC_to_beam_map(yaml::node node, const std::vector<slot_command_api::channel_type>& channels, cell_mplane_destination& dest_cfg)
+{
+    for(int i = 0; i < node.length(); ++i)
+    {
+        auto eAxC_id = static_cast<int>(node[i]);
+        for (auto channel : channels)
+        {
+            dest_cfg.eAxC_ids[channel].push_back(eAxC_id);
         }
     }
 
@@ -2414,6 +2496,23 @@ uint8_t& YamlParser::get_cuphydriver_cell_group() {
 }
 uint8_t& YamlParser::get_cuphydriver_cell_group_num() {
     return phydriver_config.cell_group_num;
+}
+
+uint16_t YamlParser::get_cuphydriver_total_uplane_txq_count() const {
+    uint16_t total = 0;
+    for (const auto& m : mplane_configs) {
+        size_t peer_count = m.destinations.empty() ? 1u : m.destinations.size();
+        total += static_cast<uint16_t>(peer_count * m.nic_cfg.txq_count_uplane);
+    }
+    return total;
+}
+
+uint16_t YamlParser::get_cuphydriver_total_peer_count() const {
+    uint16_t total = 0;
+    for (const auto& m : mplane_configs) {
+        total += static_cast<uint16_t>(m.destinations.empty() ? 1u : m.destinations.size());
+    }
+    return total;
 }
 
 uint8_t YamlParser::get_cuphydriver_pusch_workCancelMode()const {

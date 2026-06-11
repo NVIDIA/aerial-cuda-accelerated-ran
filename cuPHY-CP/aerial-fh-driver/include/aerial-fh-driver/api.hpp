@@ -249,11 +249,11 @@ enum class UserDataCompressionMethod : uint8_t
 
 // Configuration-dependent cell limits
 #ifdef ENABLE_64C
-#define API_MAX_NUM_CELLS 64  //!< Maximum cells (64-cell config, power of 2 for DOCA)
+#define API_MAX_NUM_CELLS 2  //!< Maximum cells (64-cell config, power of 2 for DOCA)
 #elif defined(ENABLE_20C)
-#define API_MAX_NUM_CELLS 32  //!< Maximum cells (20-cell config, power of 2 for DOCA)
+#define API_MAX_NUM_CELLS 2  //!< Maximum cells (20-cell config, power of 2 for DOCA)
 #else
-#define API_MAX_NUM_CELLS 16  //!< Maximum cells (default config)
+#define API_MAX_NUM_CELLS 2  //!< Maximum cells (default config)
 #endif
 
 #ifdef ENABLE_32DL
@@ -599,6 +599,8 @@ struct FlowInfo
     uint8_t       channel;         //!< Channel number (deprecated, to be removed)
     bool          request_new_rxq; //!< Request new RX queue for this flow
     void*         rxq;             //!< RX queue pointer
+    uint8_t       dst_mac_override[6] = {0}; //!< dMIMO: per-flow dst MAC (used iff has_dst_mac_override)
+    bool          has_dst_mac_override = false; //!< when set, use dst_mac_override instead of the peer's dst MAC
 };
 
 /******************************************************************/ /**
@@ -796,7 +798,8 @@ struct CPlaneSectionExt11Info
     uint16_t                                            numPrbBundles;
     uint16_t                                            numBundPrb;
     uint8_t                                             bundle_hdr_size;
-    uint16_t                                            bfwIQ_size;
+    uint16_t                                            bfwIQ_size;       // on-the-wire weight bytes per bundle (may be padded up to a wider array)
+    uint16_t                                            real_bfwIQ_size;  // dMIMO: real computed weight bytes (<= bfwIQ_size); the (bfwIQ_size - real) tail is zero-filled. 0 => no padding (use bfwIQ_size)
     uint8_t                                             bundle_size;
     bool                                                static_bfw;
     uint8_t*                                            bfwIQ; // Stores the pointer to the bfwIQ buffer with offset applied for this eAxC

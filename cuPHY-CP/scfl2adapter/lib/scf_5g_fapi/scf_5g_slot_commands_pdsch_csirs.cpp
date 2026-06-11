@@ -954,6 +954,23 @@ namespace scf_5g_fapi {
                                 prb_info.bfwCoeff_buf_info.header = bfwCoeff_mem_info->header;
                                 prb_info.bfwCoeff_buf_info.p_buf_bfwCoef_h = bfwCoeff_mem_info->buff_addr_chunk_h[ue_grp_bfw_index_per_cell];
                                 prb_info.bfwCoeff_buf_info.p_buf_bfwCoef_d = bfwCoeff_mem_info->buff_addr_chunk_d[ue_grp_bfw_index_per_cell];
+                                // Dump the SRS-derived dynamic BFW weights for this UE into the data lake
+                                // (dyn_bfw_weights, keyed by rnti). Host coeff buffer layout per (layer,prg)
+                                // bundle = [exponent byte + 2*nGnbAnt*bfwIqWidth/8 packed mantissas]. nLayers
+                                // is 1 today (single-layer); wire the real layer count when SU-MIMO lands.
+                                {
+                                    const uint8_t  _dl_iqw    = 9;   // dynamic BFW BFP width (matches fh.cpp)
+                                    const uint8_t  _dl_layers = 1;
+                                    const uint8_t  _dl_ngnb   = bfwCoeff_mem_info->nGnbAnt;
+                                    const uint16_t _dl_nprg   = pmi_bf_pdu.num_prgs;
+                                    const uint32_t _dl_bundle = 1u + (uint32_t)(2 * _dl_ngnb * _dl_iqw) / 8u;
+                                    nv::PHYDriverProxy& _dl_phy = nv::PHYDriverProxy::getInstance();
+                                    l1_datalake_notify_bfw(_dl_phy.get_driver(), (uint16_t)cell_index, ue.rnti,
+                                        slot_3gpp.sfn_, slot_3gpp.slot_, 0 /*beamId assigned later in FH*/,
+                                        _dl_ngnb, _dl_nprg, (uint16_t)pmi_bf_pdu.prg_size, _dl_iqw, _dl_layers,
+                                        (const uint8_t*)bfwCoeff_mem_info->buff_addr_chunk_h[ue_grp_bfw_index_per_cell],
+                                        (uint32_t)_dl_nprg * _dl_layers * _dl_bundle);
+                                }
                                 NVLOGD_FMT(TAG, "PDSCH new Grp dig_bf_interfaces={}, prb_info.common.portMask {}, num_prgs={}, prg_size={}, buff_addr_chunk_h[{}]={}",
                                                 pmi_bf_pdu.dig_bf_interfaces, static_cast<uint32_t>(prb_info.common.portMask), 
                                                 static_cast<uint16_t>(pmi_bf_pdu.num_prgs), static_cast<uint16_t>(pmi_bf_pdu.prg_size), ue_grp_bfw_index_per_cell, reinterpret_cast<void*>(bfwCoeff_mem_info->buff_addr_chunk_h[ue_grp_bfw_index_per_cell]));

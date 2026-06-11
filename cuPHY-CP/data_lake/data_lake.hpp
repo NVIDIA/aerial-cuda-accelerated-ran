@@ -371,7 +371,15 @@ class DataLake {
 		}
 	}
 	~DataLake(void);
-	
+
+	// Dump SRS-derived dynamic DL beamforming weights (per UE / RNTI) into the
+	// dyn_bfw_weights table. bfp = per-bundle BFP block [exponent byte + packed
+	// 2*bfwIqWidth-bit I/Q mantissas], nPrg bundles back-to-back; decompressed to
+	// Float32 (Q15) off the RT path by a worker thread.
+	void notifyBfw(uint16_t cellId, uint16_t rnti, uint16_t sfn, uint16_t slot,
+		uint16_t beamId, uint8_t nGnbAnt, uint16_t nPrg, uint16_t prgSize,
+		uint8_t bfwIqWidth, uint8_t nLayers, const uint8_t* bfp, uint32_t bfpLen);
+
 	void initMem (void);
 	void initThreads(uint8_t numThreads);
 	void dbInit (std::string host, std::string engine, bool dropTables);
@@ -383,7 +391,8 @@ class DataLake {
 	void insertPusch(puschInfo_t* puschInfo);
 	void insertFh(fhInfo_t* fhInfo);
 	void insertHest(hestInfo_t* hestInfo);
-	
+
+
 	void collectSlot(void);
 	void doInserts(void);
 	void submitTask(std::function<void()> task);
@@ -402,6 +411,8 @@ class DataLake {
 		ch::Client *fhClient = nullptr;
 		ch::Client *dbClient = nullptr;
 		ch::Client *hestClient = nullptr;
+		ch::Client *bfwClient = nullptr;      // dyn_bfw_weights inserts
+		std::mutex  bfwClientMutex;           // ch::Client is not concurrency-safe
 		friend class E3Agent;
 		
 	private:

@@ -126,6 +126,15 @@ struct nic_resource_config
 using eAxC_list = std::array<std::vector<uint16_t>, slot_command_api::channel_type::CHANNEL_MAX>;
 
 /******************************************************************/ /**
+ * @brief Per-destination MAC + eAxC mapping for multi-MAC (dMIMO) routing
+ */
+struct cell_mplane_destination
+{
+    std::array<uint8_t, 6> dst_eth_addr;
+    eAxC_list              eAxC_ids;
+};
+
+/******************************************************************/ /**
  * @brief Simulate M-plane info per cell when creating the L1 context
  *
  */
@@ -136,6 +145,7 @@ struct cell_mplane_info
 
     std::array<uint8_t, 6> src_eth_addr;                        ///< Source MAC address for ORAN fronthaul
     std::array<uint8_t, 6> dst_eth_addr;                        ///< Destination MAC address for ORAN fronthaul
+    std::vector<cell_mplane_destination> destinations;          ///< dMIMO: per-RU-MAC eAxC routing (empty => single dst_eth_addr)
     std::string            nic_name;                            ///< Network interface card name
     uint32_t               nic_index;                           ///< Network interface card index
     uint16_t               vlan_tci;                            ///< VLAN Tag Control Information (TCI)
@@ -1224,6 +1234,16 @@ int l1_cv_mem_bank_update_buffer_state(phydriver_handle pdh, uint32_t cell_id, u
  * @sa ::l1_cv_mem_bank_update_buffer_state
  */
 int l1_cv_mem_bank_get_buffer_state(phydriver_handle pdh, uint32_t cell_id, uint16_t buffer_idx, slot_command_api::srsChestBuffState *srs_chest_buff_state);
+
+/******************************************************************/ /**
+ * Dump SRS-derived dynamic DL beamforming weights for one UE (rnti) into the
+ * data lake (dyn_bfw_weights table). bfp points at the per-bundle BFP coeff
+ * block (exponent byte + packed I/Q mantissas), nPrg*nLayers bundles. No-op if
+ * the data lake is disabled. Returns 0 on success, -1 if no data lake.
+ *//*******************************************************************/
+int l1_datalake_notify_bfw(phydriver_handle pdh, uint16_t cell_id, uint16_t rnti, uint16_t sfn, uint16_t slot,
+                           uint16_t beam_id, uint8_t n_gnb_ant, uint16_t n_prg, uint16_t prg_size,
+                           uint8_t bfw_iq_width, uint8_t n_layers, const uint8_t* bfp, uint32_t bfp_len);
 
 /******************************************************************/ /**
  * @brief Update SRS channel estimate buffer usage counter
