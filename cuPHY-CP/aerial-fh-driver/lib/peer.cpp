@@ -1422,6 +1422,48 @@ inline void populate_se11_disablebfw_1_bundles(
     section_ptr += padding;
 }
 
+// --- dMIMO SE11 PE1->64 antenna-port scatter ------------------------------
+// The cuPHY coeff buffer holds the 32 computed PE1 BFW weights in chain-major
+// (eAxC_id_srs) order: [RFSoC_A: ports 1,2,3,4,9,10,11,12][RFSoC_B ...][C][D].
+// The Amplitech RU lays its 64 DL-TRX elements out antenna-port-major (port
+// 1..16, RFSoC A..D within each port); PE1 owns antenna ports 1-4 & 9-12, which
+// map to wire slots {0-15, 32-47}, while PE2 (ports 5-8 & 13-16) owns {16-31,
+// 48-63}. So PE1 is NOT a contiguous 0..31 block: each computed weight must be
+// placed at its antenna-port slot and the PE2 slots zeroed. se11_pe1_scatter[i]
+// = wire antenna index for chain-major source weight i.
+static const uint8_t se11_pe1_scatter[32] = {
+     0,  4,  8, 12, 32, 36, 40, 44,   // RFSoC_A: ports 1-4, 9-12
+     1,  5,  9, 13, 33, 37, 41, 45,   // RFSoC_B: ports 1-4, 9-12
+     2,  6, 10, 14, 34, 38, 42, 46,   // RFSoC_C: ports 1-4, 9-12
+     3,  7, 11, 15, 35, 39, 43, 47    // RFSoC_D: ports 1-4, 9-12
+};
+// MSB-first bit get/set over the O-RAN BFW octet stream (bit 0 = MSB of byte 0).
+static inline uint32_t se11_get_bits(const uint8_t* b, int pos, int n) {
+    uint32_t v = 0;
+    for(int k = 0; k < n; ++k) { int p = pos + k; v = (v << 1) | ((b[p >> 3] >> (7 - (p & 7))) & 1u); }
+    return v;
+}
+static inline void se11_set_bits(uint8_t* b, int pos, int n, uint32_t v) {
+    for(int k = 0; k < n; ++k) {
+        int p = pos + k, by = p >> 3, sh = 7 - (p & 7);
+        if((v >> (n - 1 - k)) & 1u) b[by] |= (1u << sh); else b[by] &= ~(1u << sh);
+    }
+}
+// Scatter the BFP-packed PE1 weights (real_sz bytes, 32 antennas) from src into
+// the 64-antenna wire layout (wire_sz bytes) in dst, zeroing PE2 slots. iqw =
+// bits per I/Q component (so 2*iqw bits per antenna). Falls back to a contiguous
+// copy if this is not the 32->64 PE1 case (forward-safe).
+static inline void se11_scatter_bfw_pe1(uint8_t* dst, const uint8_t* src, int iqw,
+                                        int real_sz, int wire_sz) {
+    const int unit  = 2 * iqw;                // bits per antenna weight (I+Q)
+    const int n_src = (real_sz * 8) / unit;   // computed antennas (expect 32)
+    const int n_dst = (wire_sz * 8) / unit;   // wire antennas (expect 64)
+    memset(dst, 0, wire_sz);
+    if(n_src != 32 || n_dst != 64 || unit > 32) { memcpy(dst, src, real_sz); return; }
+    for(int i = 0; i < 32; ++i)
+        se11_set_bits(dst, se11_pe1_scatter[i] * unit, unit, se11_get_bits(src, i * unit, unit));
+}
+
 inline void populate_se11_disablebfw_0_bundles(
     uint8_t*& section_ptr,
     CPlaneSectionExtInfo* ext11_ptr,
@@ -1441,7 +1483,12 @@ inline void populate_se11_disablebfw_0_bundles(
             bundle_ptr->beamId = bundle_info.disableBFWs_0_uncompressed.beamId.get();
             bundle_ptr->reserved = 0;  // Initialize reserved field
             auto bundle_iq_ptr = reinterpret_cast<uint8_t*>(bundle_ptr->bfw);
-            memcpy(bundle_iq_ptr, bundle_info.bfwIQ, bfwIQ_size);
+            uint16_t real_sz = ext11_ptr->ext_11.real_bfwIQ_size;
+            if(real_sz == 0 || real_sz > bfwIQ_size) real_sz = bfwIQ_size; // no padding (static/PDSCH/other)
+            if(bfwIQ_size > real_sz) // dMIMO: scatter PE1 weights to antenna-port slots, zero PE2
+                se11_scatter_bfw_pe1(bundle_iq_ptr, bundle_info.bfwIQ, ext11_ptr->ext_11.ext_comp_hdr.bfwIqWidth.get(), real_sz, bfwIQ_size);
+            else
+                memcpy(bundle_iq_ptr, bundle_info.bfwIQ, real_sz);
             section_ptr = bundle_iq_ptr + bfwIQ_size;
         }
         else if(comp_meth == UserDataCompressionMethod::BLOCK_FLOATING_POINT)
@@ -1453,7 +1500,12 @@ inline void populate_se11_disablebfw_0_bundles(
             bundle_ptr->bfwCompParam.reserved = 0;  // Initialize reserved field
 
             auto bundle_iq_ptr                = reinterpret_cast<uint8_t*>(bundle_ptr->bfw);
-            memcpy(bundle_iq_ptr, bundle_info.bfwIQ, bfwIQ_size);
+            uint16_t real_sz = ext11_ptr->ext_11.real_bfwIQ_size;
+            if(real_sz == 0 || real_sz > bfwIQ_size) real_sz = bfwIQ_size; // no padding (static/PDSCH/other)
+            if(bfwIQ_size > real_sz) // dMIMO: scatter PE1 weights to antenna-port slots, zero PE2
+                se11_scatter_bfw_pe1(bundle_iq_ptr, bundle_info.bfwIQ, ext11_ptr->ext_11.ext_comp_hdr.bfwIqWidth.get(), real_sz, bfwIQ_size);
+            else
+                memcpy(bundle_iq_ptr, bundle_info.bfwIQ, real_sz);
             section_ptr = bundle_iq_ptr + bfwIQ_size;
         }
     }
@@ -3233,7 +3285,10 @@ uint16_t Peer::prepare_cplane_message(const CPlaneMsgSendInfo& info, rte_mbuf** 
                                     bundle_ptr->beamId = bundle_info.disableBFWs_0_uncompressed.beamId.get();
                                     bundle_ptr->reserved = 0;  // Initialize reserved field
                                     auto bundle_iq_ptr = reinterpret_cast<uint8_t*>(bundle_ptr->bfw);
-                                    memcpy(bundle_iq_ptr, bundle_info.bfwIQ, bfwIQ_size);
+                                    uint16_t real_sz = ext11_ptr->ext_11.real_bfwIQ_size;
+                                    if(real_sz == 0 || real_sz > bfwIQ_size) real_sz = bfwIQ_size; // no padding
+                                    memcpy(bundle_iq_ptr, bundle_info.bfwIQ, real_sz);
+                                    if(bfwIQ_size > real_sz) memset(bundle_iq_ptr + real_sz, 0, bfwIQ_size - real_sz); // dMIMO: zero-fill padded antennas
                                     current_ptr = bundle_iq_ptr + bfwIQ_size;
                                 }
                                 else if(comp_meth == UserDataCompressionMethod::BLOCK_FLOATING_POINT)
@@ -3244,7 +3299,10 @@ uint16_t Peer::prepare_cplane_message(const CPlaneMsgSendInfo& info, rte_mbuf** 
                                     bundle_ptr->bfwCompParam.exponent = bundle_info.disableBFWs_0_compressed.bfwCompParam.exponent.get();
                                     bundle_ptr->bfwCompParam.reserved = 0;  // Initialize reserved field
                                     auto bundle_iq_ptr                = reinterpret_cast<uint8_t*>(bundle_ptr->bfw);
-                                    memcpy(bundle_iq_ptr, bundle_info.bfwIQ, bfwIQ_size);
+                                    uint16_t real_sz = ext11_ptr->ext_11.real_bfwIQ_size;
+                                    if(real_sz == 0 || real_sz > bfwIQ_size) real_sz = bfwIQ_size; // no padding
+                                    memcpy(bundle_iq_ptr, bundle_info.bfwIQ, real_sz);
+                                    if(bfwIQ_size > real_sz) memset(bundle_iq_ptr + real_sz, 0, bfwIQ_size - real_sz); // dMIMO: zero-fill padded antennas
                                     current_ptr = bundle_iq_ptr + bfwIQ_size;
                                 }
                             }

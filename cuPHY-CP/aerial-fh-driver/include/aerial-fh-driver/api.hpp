@@ -796,7 +796,8 @@ struct CPlaneSectionExt11Info
     uint16_t                                            numPrbBundles;
     uint16_t                                            numBundPrb;
     uint8_t                                             bundle_hdr_size;
-    uint16_t                                            bfwIQ_size;
+    uint16_t                                            bfwIQ_size;       // on-the-wire weight bytes per bundle (may be padded up to a wider array)
+    uint16_t                                            real_bfwIQ_size;  // dMIMO: real computed weight bytes (<= bfwIQ_size); the (bfwIQ_size - real) tail is zero-filled. 0 => no padding (use bfwIQ_size)
     uint8_t                                             bundle_size;
     bool                                                static_bfw;
     uint8_t*                                            bfwIQ; // Stores the pointer to the bfwIQ buffer with offset applied for this eAxC

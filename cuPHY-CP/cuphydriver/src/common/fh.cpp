@@ -1055,13 +1055,21 @@ void FhProxy::fill_dynamic_section_ext11(const slot_command_api::oran_slot_ind& 
         extLenBytes += sizeof(oran_cmsg_sect_ext_type_11_disableBFWs_0_bfwCompHdr);
 
         section_ext_info.ext_11.bundle_hdr_size = oran_cmsg_get_bfw_bundle_hdr_size(static_cast<UserDataBFWCompressionMethod>(section_ext_info.ext_11.ext_comp_hdr.bfwCompMeth.get()));
-        section_ext_info.ext_11.bfwIQ_size = (params.L_TRX * params.bfwIQBitwidth * 2) / 8;
+        // dMIMO: pad the SE11 weights up to the full antenna array on the wire. Only params.L_TRX
+        // (= nGnbAnt, e.g. 32 for PE1) weights are actually computed; the remaining antennas are
+        // zero-filled in populate_se11_disablebfw_0_bundles. real_bfwIQ_size keeps the coeff-buffer
+        // stride at the computed width; bfwIQ_size is the (possibly wider) on-the-wire width.
+        constexpr int BFW_WIRE_NUM_ANT = 64; // full dual-PE array; un-sounded antennas zero-filled
+        int wire_L_TRX = std::max<int>(params.L_TRX, BFW_WIRE_NUM_ANT);
+        section_ext_info.ext_11.real_bfwIQ_size = (params.L_TRX * params.bfwIQBitwidth * 2) / 8;
+        section_ext_info.ext_11.bfwIQ_size = (wire_L_TRX * params.bfwIQBitwidth * 2) / 8;
         section_ext_info.ext_11.bundle_size = section_ext_info.ext_11.bfwIQ_size + section_ext_info.ext_11.bundle_hdr_size;
     }
     else
     {
         section_ext_info.ext_11.bundle_hdr_size = sizeof(oran_cmsg_sect_ext_type_11_disableBFWs_1_bundle);
         section_ext_info.ext_11.bfwIQ_size = 0;
+        section_ext_info.ext_11.real_bfwIQ_size = 0;
         section_ext_info.ext_11.bundle_size = section_ext_info.ext_11.bundle_hdr_size;
     }
     int bundleLenBytes = section_ext_info.ext_11.bundle_hdr_size + section_ext_info.ext_11.bfwIQ_size;
@@ -1106,8 +1114,10 @@ void FhProxy::fill_dynamic_section_ext11(const slot_command_api::oran_slot_ind& 
                 // (see field bfwCompParam in Table 7.7.11.1-1 in O-RAN.WG4.CUS.0-v10.00)
                 // nLayers dimension
 
-                int buffer_index = params.active_ap_idx * bfwCoeff_buf_info.num_prgs * (section_ext_info.ext_11.bfwIQ_size + 1); // +1 for exponent
-                buffer_index += bundle_index * (section_ext_info.ext_11.bfwIQ_size + 1); // +1 for exponent
+                // Stride on the REAL (computed) coeff width, not the padded wire width: the cuPHY
+                // coeff buffer holds exponent + real_bfwIQ_size coefficients per bundle.
+                int buffer_index = params.active_ap_idx * bfwCoeff_buf_info.num_prgs * (section_ext_info.ext_11.real_bfwIQ_size + 1); // +1 for exponent
+                buffer_index += bundle_index * (section_ext_info.ext_11.real_bfwIQ_size + 1); // +1 for exponent
                 bundle_info.disableBFWs_0_compressed.bfwCompParam.exponent = buffer_ptr[buffer_index++];
                 bundle_info.bfwIQ = &buffer_ptr[buffer_index];
                 *params.bfw_header = bfwCoeff_buf_info.header;
@@ -1196,6 +1206,7 @@ void fill_static_section_ext(uint8_t* static_bfw_ptr, uint32_t cell_id, slot_com
     section_ext_info.ext_11.bundle_hdr_size = sizeof(oran_cmsg_sect_ext_type_11_disableBFWs_0_bundle_uncompressed);
     int L_TRX = bfwCoeff_buf_info.nGnbAnt;
     section_ext_info.ext_11.bfwIQ_size = (L_TRX * bfwIQBitwidth * 2) / 8;
+    section_ext_info.ext_11.real_bfwIQ_size = section_ext_info.ext_11.bfwIQ_size; // static BFW: no zero-padding
     int bundleLenBytes = section_ext_info.ext_11.bundle_hdr_size + section_ext_info.ext_11.bfwIQ_size;
     section_ext_info.ext_11.numPrbBundles = (numPrbc + bfwCoeff_buf_info.prg_size - 1) / bfwCoeff_buf_info.prg_size;
     section_ext_info.ext_11.static_bfw = true;
@@ -2447,6 +2458,7 @@ int FhProxy::prepareCPlaneInfo(
                                     section_ext_info.ext_11.bundle_hdr_size = sizeof(oran_cmsg_sect_ext_type_11_disableBFWs_0_bfp_compressed_bundle_hdr);
                                     L_TRX = prb_info->bfwCoeff_buf_info.nGnbAnt;
                                     section_ext_info.ext_11.bfwIQ_size = (L_TRX * bfwIQBitwidth * 2) / 8;
+                                    section_ext_info.ext_11.real_bfwIQ_size = section_ext_info.ext_11.bfwIQ_size; // PDSCH BFW: no zero-padding
                                     int bundleLenBytes = section_ext_info.ext_11.bundle_hdr_size + section_ext_info.ext_11.bfwIQ_size;
                                     section_ext_info.ext_11.numPrbBundles = (prb_info->common.numPrbc + prb_info->bfwCoeff_buf_info.prg_size - 1) / prb_info->bfwCoeff_buf_info.prg_size;
                                     auto& numPrbBundles = section_ext_info.ext_11.numPrbBundles;
