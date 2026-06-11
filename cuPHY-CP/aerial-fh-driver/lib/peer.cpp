@@ -537,9 +537,12 @@ void Peer::create_rx_rule(const std::vector<uint16_t>& eAxC_list_ul,const std::v
     memset(&eth_spec, 0, sizeof(eth_spec));
     memset(&eth_mask, 0, sizeof(eth_mask));
     memcpy(eth_spec.dst.addr_bytes, info_.src_mac_addr.bytes, RTE_ETHER_ADDR_LEN);
-    memcpy(eth_spec.src.addr_bytes, info_.dst_mac_addr.bytes, RTE_ETHER_ADDR_LEN);
+    // dMIMO: true wildcard source MAC -- leave eth_spec.src zeroed AND mask.src=0 so
+    // this primary UL RX rule matches UL/SRS U-plane from ANY RU/PE into the primary
+    // queue. eAxC IDs isolate the flows. NB: on 26-1 mlx5, a non-zero spec.src with a
+    // zero mask is mishandled (drops all UL), so spec.src must be left zero here.
     memset(&eth_mask.dst.addr_bytes, 0xFF, sizeof(eth_mask.dst.addr_bytes));
-    memset(&eth_mask.src.addr_bytes, 0xFF, sizeof(eth_mask.src.addr_bytes));
+    memset(&eth_mask.src.addr_bytes, 0x00, sizeof(eth_mask.src.addr_bytes));
     eth_spec.type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
     eth_mask.type = 0xFFFF;
     eth_spec.has_vlan = 1;

@@ -227,7 +227,12 @@ void Flow::setup_packet_header_template()
 
     memset(&pkt_hdr_template_, 0, sizeof(pkt_hdr_template_));
     memcpy(pkt_hdr_template_.eth.src_addr.addr_bytes, peer_info.src_mac_addr.bytes, RTE_ETHER_ADDR_LEN);
-    memcpy(pkt_hdr_template_.eth.dst_addr.addr_bytes, peer_info.dst_mac_addr.bytes, RTE_ETHER_ADDR_LEN);
+    // dMIMO: a flow may carry a per-flow dst MAC override (e.g. SRS sounded by a
+    // secondary PE) so its C-plane reaches that PE over this (primary) peer's TX queue.
+    if(info_.has_dst_mac_override)
+        memcpy(pkt_hdr_template_.eth.dst_addr.addr_bytes, info_.dst_mac_override, RTE_ETHER_ADDR_LEN);
+    else
+        memcpy(pkt_hdr_template_.eth.dst_addr.addr_bytes, peer_info.dst_mac_addr.bytes, RTE_ETHER_ADDR_LEN);
 
     pkt_hdr_template_.eth.ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_VLAN);
     pkt_hdr_template_.vlan.vlan_tci  = rte_cpu_to_be_16(info_.vlan_tag.tci);

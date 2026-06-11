@@ -562,6 +562,7 @@ private:
     //// eAxC ID Configuration (ORAN Antenna-Carrier Identifiers)
     ////////////////////////////////////////////////////////////////////////////////////////////////////////
     eAxC_list eAxC_ids;                                           ///< All eAxC IDs organized by channel type
+    std::vector<cell_mplane_destination> mplane_destinations_;    ///< dMIMO: per-PE destinations (dst MAC + per-channel eAxC); empty for single-PE
     std::vector<uint16_t> eAxC_list_ul;                           ///< Unique list of eAxC IDs aggregated over PUSCH/PUCCH/PRACH channels
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////

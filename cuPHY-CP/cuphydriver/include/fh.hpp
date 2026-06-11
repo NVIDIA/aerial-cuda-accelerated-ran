@@ -412,7 +412,7 @@ public:
      * @param channel  - Channel type (PDSCH, PUSCH, PRACH, etc.)
      * @return 0 on success, negative error code on failure
      */
-    int                 registerFlow(peer_id_t peer_id, uint16_t eAxC_id, uint16_t vlan_tci, slot_command_api::channel_type channel);
+    int                 registerFlow(peer_id_t peer_id, uint16_t eAxC_id, uint16_t vlan_tci, slot_command_api::channel_type channel, const std::array<uint8_t, 6>* dst_mac_override = nullptr);
     
     /**
      * @brief Store DBT (Digital Beamforming Table) PDU

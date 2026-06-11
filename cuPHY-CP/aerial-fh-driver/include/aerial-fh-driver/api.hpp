@@ -599,6 +599,8 @@ struct FlowInfo
     uint8_t       channel;         //!< Channel number (deprecated, to be removed)
     bool          request_new_rxq; //!< Request new RX queue for this flow
     void*         rxq;             //!< RX queue pointer
+    uint8_t       dst_mac_override[6] = {0}; //!< dMIMO: per-flow dst MAC (used iff has_dst_mac_override)
+    bool          has_dst_mac_override = false; //!< when set, use dst_mac_override instead of the peer's dst MAC
 };
 
 /******************************************************************/ /**

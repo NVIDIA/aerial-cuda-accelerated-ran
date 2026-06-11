@@ -88,6 +88,7 @@ Cell::Cell(
     ul_u_plane_tx_offset_ns = _mplane.ul_u_plane_tx_offset_ns;
     tcp_adv_dl_ns          = _mplane.tcp_adv_dl_ns;
     eAxC_ids               = _mplane.eAxC_ids;
+    mplane_destinations_   = _mplane.destinations;
     fh_len_range           = _mplane.fh_len_range;
     nMaxRxAnt              = _mplane.nMaxRxAnt;
     srs_cell_dyn_index   = -1;
@@ -145,6 +146,23 @@ Cell::Cell(
         TI_GENERIC_ADD("registerFlow");
         for(int channel = slot_command_api::channel_type::PDSCH_CSIRS; channel < slot_command_api::channel_type::CHANNEL_MAX; channel++)
         {
+            // dMIMO: SRS may be sounded by multiple PEs (destinations). Register each
+            // destination's SRS eAxC with that destination's dst MAC so the SRS C-plane
+            // reaches the right PE over this single (primary) peer's TX queue. The SRS
+            // U-plane is caught back into the primary SRS RX queue by the wildcard src
+            // MAC RX rule, so no extra peer/RX queue is needed.
+            if(!mplane_destinations_.empty() && channel == slot_command_api::channel_type::SRS)
+            {
+                for(const auto& dest : mplane_destinations_)
+                {
+                    for(auto eAxC : dest.eAxC_ids[slot_command_api::channel_type::SRS])
+                    {
+                        if(fh_proxy->registerFlow(nic2peer_map[nic], eAxC, vlan_tci, slot_command_api::channel_type::SRS, &dest.dst_eth_addr))
+                            PHYDRIVER_THROW_EXCEPTIONS(-1, "Add flow returned error");
+                    }
+                }
+                continue;
+            }
             for(auto eAxC : eAxC_ids[channel])
             {
                 if(fh_proxy->registerFlow(nic2peer_map[nic], eAxC, vlan_tci, static_cast<slot_command_api::channel_type>(channel)))
@@ -539,6 +557,23 @@ int Cell::updateeAxCIds(std::unordered_map<int, std::vector<uint16_t>>& eaxcids_
 
         for(int channel = slot_command_api::channel_type::PDSCH_CSIRS; channel < slot_command_api::channel_type::CHANNEL_MAX; channel++)
         {
+            // dMIMO: SRS may be sounded by multiple PEs (destinations). Register each
+            // destination's SRS eAxC with that destination's dst MAC so the SRS C-plane
+            // reaches the right PE over this single (primary) peer's TX queue. The SRS
+            // U-plane is caught back into the primary SRS RX queue by the wildcard src
+            // MAC RX rule, so no extra peer/RX queue is needed.
+            if(!mplane_destinations_.empty() && channel == slot_command_api::channel_type::SRS)
+            {
+                for(const auto& dest : mplane_destinations_)
+                {
+                    for(auto eAxC : dest.eAxC_ids[slot_command_api::channel_type::SRS])
+                    {
+                        if(fh_proxy->registerFlow(nic2peer_map[nic], eAxC, vlan_tci, slot_command_api::channel_type::SRS, &dest.dst_eth_addr))
+                            PHYDRIVER_THROW_EXCEPTIONS(-1, "Add flow returned error");
+                    }
+                }
+                continue;
+            }
             for(auto eAxC : eAxC_ids[channel])
             {
                 if(fh_proxy->registerFlow(nic2peer_map[nic], eAxC, vlan_tci, static_cast<slot_command_api::channel_type>(channel)))

@@ -567,7 +567,7 @@ struct rx_order_t * FhProxy::getRxOrderItemsPeer(peer_id_t peer_id) {
     return &(peer_ptr->rx_order_items);
 }
 
-int FhProxy::registerFlow(peer_id_t peer_id, uint16_t eAxC_id, uint16_t vlan_tci, slot_command_api::channel_type channel)
+int FhProxy::registerFlow(peer_id_t peer_id, uint16_t eAxC_id, uint16_t vlan_tci, slot_command_api::channel_type channel, const std::array<uint8_t, 6>* dst_mac_override)
 {
     TI_GENERIC_INIT("FhProxy::registerFlow",15);
     TI_GENERIC_ADD("Start Task");
@@ -611,6 +611,12 @@ int FhProxy::registerFlow(peer_id_t peer_id, uint16_t eAxC_id, uint16_t vlan_tci
     {
         TI_GENERIC_ADD("Create Flow Objects");
         FlowInfo flow_info{eAxC_id, FlowType::CPLANE, vlan_tci};
+        // dMIMO: per-flow dst MAC override (applies to both the C-plane and U-plane flow below)
+        if(dst_mac_override)
+        {
+            memcpy(flow_info.dst_mac_override, dst_mac_override->data(), 6);
+            flow_info.has_dst_mac_override = true;
+        }
         FlowHandle flow_handle;
         if(channel >= slot_command_api::channel_type::PDSCH_CSIRS && channel <= slot_command_api::channel_type::PDCCH_DMRS)
         {

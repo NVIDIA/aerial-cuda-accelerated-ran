@@ -217,6 +217,7 @@
 #define YAML_PARAM_CELL_RU_TYPE "ru_type"
 #define YAML_PARAM_CELL_SRC_MAC_ADDR "src_mac_addr"
 #define YAML_PARAM_CELL_DST_MAC_ADDR "dst_mac_addr"
+#define YAML_PARAM_CELL_DESTINATIONS "destinations"
 #define YAML_PARAM_CELL_TXQ_COUNT_UPLANE "txq_count_uplane"
 #define YAML_PARAM_CELL_VLAN "vlan"
 #define YAML_PARAM_CELL_PCP "pcp"
@@ -552,6 +553,10 @@ public:
     uint8_t& get_cuphydriver_cpu_init_comms();
     uint8_t& get_cuphydriver_cell_group();
     uint8_t& get_cuphydriver_cell_group_num();
+    /** Total U-plane TXQ count for NIC: sum over cells of (peer_count * txq_count_uplane). Supports multi-destination. */
+    uint16_t get_cuphydriver_total_uplane_txq_count() const;
+    /** Total peer count across all cells (destinations.size() or 1 per cell). For c-plane TXQ scaling. */
+    uint16_t get_cuphydriver_total_peer_count() const;
     struct slot_command_api::slot_command * get_cuphydriver_standalone_slot_command(int slot_num);
     uint8_t get_cuphydriver_pusch_workCancelMode() const;
     uint8_t get_cuphydriver_pusch_tdi() const;
@@ -645,6 +650,7 @@ private:
     int parse_cell_configs(yaml::node root);
     int parse_single_cell(yaml::node cell,std::string *p_unique_nic_info,size_t length);
     int parse_eAxC_to_beam_map(yaml::node node, const std::vector<slot_command_api::channel_type>& channels, cell_mplane_info& mplane_cfg);
+    int parse_eAxC_to_beam_map(yaml::node node, const std::vector<slot_command_api::channel_type>& channels, cell_mplane_destination& dest_cfg);
 
     std::string l2adapter_config_filename;
     std::string cuphycontroller_config_filename;

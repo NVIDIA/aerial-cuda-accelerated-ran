@@ -126,6 +126,15 @@ struct nic_resource_config
 using eAxC_list = std::array<std::vector<uint16_t>, slot_command_api::channel_type::CHANNEL_MAX>;
 
 /******************************************************************/ /**
+ * @brief Per-destination MAC + eAxC mapping for multi-MAC (dMIMO) routing
+ */
+struct cell_mplane_destination
+{
+    std::array<uint8_t, 6> dst_eth_addr;
+    eAxC_list              eAxC_ids;
+};
+
+/******************************************************************/ /**
  * @brief Simulate M-plane info per cell when creating the L1 context
  *
  */
@@ -136,6 +145,7 @@ struct cell_mplane_info
 
     std::array<uint8_t, 6> src_eth_addr;                        ///< Source MAC address for ORAN fronthaul
     std::array<uint8_t, 6> dst_eth_addr;                        ///< Destination MAC address for ORAN fronthaul
+    std::vector<cell_mplane_destination> destinations;          ///< dMIMO: per-RU-MAC eAxC routing (empty => single dst_eth_addr)
     std::string            nic_name;                            ///< Network interface card name
     uint32_t               nic_index;                           ///< Network interface card index
     uint16_t               vlan_tci;                            ///< VLAN Tag Control Information (TCI)
