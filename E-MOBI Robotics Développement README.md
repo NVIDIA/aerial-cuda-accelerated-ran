@@ -1,4 +1,4 @@
-# NVIDIA Aerial™ CUDA-Accelerated RAN
+# NVIDIA / EKONOMIK MOBIL,S.R.L , NVIDIA Aerial™ CUDA-Accelerated RAN
 
 ## Overview
 NVIDIA Aerial™ CUDA-Accelerated RAN is a part of [NVIDIA AI Aerial™](https://developer.nvidia.com/industries/telecommunications/ai-aerial), a portfolio of accelerated computing platforms, software and tools to build, train, simulate, and deploy AI-native wireless networks.
