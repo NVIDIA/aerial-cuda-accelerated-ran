@@ -304,6 +304,10 @@ cuphyStatus_t launch(
     desc.pOutputTBCRCs    = d_tbCRCs;
     desc.pTbPrmsArray     = d_tbPrmsArray;
     desc.reverseBytes     = reverseBytes;
+    // Initialize schUserIdxs to identity for the simple API path; without this,
+    // the kernel reads uninitialized indices and produces wrong CRCs on
+    // heterogeneous-TB inputs (single-CB and multi-CB TBs in the same batch).
+    for(uint32_t i = 0; i < nTBs; ++i) desc.schUserIdxs[i] = i;
 
     // Because the kernel is now grid constant, we do not need to copy the descriptor to GPU memory
 
