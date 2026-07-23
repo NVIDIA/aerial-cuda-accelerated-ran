@@ -137,10 +137,13 @@ if [ "$DOCA" = "" ]; then
     export DOCA=1
 fi
 
+# Debian multiarch directory name, e.g. x86_64-linux-gnu or aarch64-linux-gnu
+LIB_ARCH=$(arch)-linux-gnu
+
 if [ "$DOCA" = "1" ]; then
-    DPDK_LINK_PATH=/opt/mellanox/doca/lib/x86_64-linux-gnu:/opt/mellanox/dpdk/lib/x86_64-linux-gnu
+    DPDK_LINK_PATH=/opt/mellanox/doca/lib/$LIB_ARCH:/opt/mellanox/dpdk/lib/$LIB_ARCH
 else
-    DPDK_LINK_PATH=$cuBB_SDK/gpu-dpdk/$BUILD/install/lib/x86_64-linux-gnu
+    DPDK_LINK_PATH=$cuBB_SDK/gpu-dpdk/$BUILD/install/lib/$LIB_ARCH
 fi
 
 
