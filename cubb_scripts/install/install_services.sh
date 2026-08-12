@@ -241,9 +241,6 @@ G.8275.portDS.localPriority     128
 network_transport               L2
 domainNumber                    24
 tx_timestamp_timeout            30
-clockClass                       7
-# To use LLS-C1 mode comment out clientOnly.
-# The PTP client will assume the GM role and advertise clockClass 7.
 clientOnly                      1
 
 clock_servo pi
@@ -347,7 +344,9 @@ EOF
     echo_and_log "[INFO] Created phc2sys.service"
 }
 
-# Install nvidia.sh script for GPU and system optimizations
+# Install nvidia.sh script for GPU and system optimizations.
+# nvidia.sh is a template; platform-specific commands are substituted before
+# writing it to /usr/local/bin/nvidia.sh.
 install_nvidia_script() {
     echo_and_log "[INFO] Installing /usr/local/bin/nvidia.sh..."
 
@@ -357,7 +356,38 @@ install_nvidia_script() {
     local SRC_FILE="${SCRIPT_DIR}/nvidia.sh"
     local DST_FILE="/usr/local/bin/nvidia.sh"
 
-    copy_file "$SRC_FILE" "$DST_FILE"
+    local gpu_clock_cmd mig_mode_cmd cpu_latency_cmd
+    case "${PLATFORM:-}" in
+        Supermicro_ARS-111GL-NHR)
+            # GH200 requires --mode=1 to unlock the full clock range; query the hardware
+            # maximum dynamically. Validate numeric result before calling -lgc.
+            gpu_clock_cmd='{ _max_clk=$(nvidia-smi -i 0 --query-gpu=clocks.max.graphics --format=csv,noheader,nounits 2>/dev/null) && [[ "$_max_clk" =~ ^[0-9]+$ ]] && nvidia-smi -i 0 -lgc "$_max_clk" --mode=1; }'
+            mig_mode_cmd='nvidia-smi -mig 0 || { echo "[ERROR] Failed to disable MIG mode"; FAILED=1; }'
+            ;;
+        NVIDIA_DGX_Spark_P4242)
+            gpu_clock_cmd='nvidia-smi -lgc 2000'
+            cpu_latency_cmd='systemctl start cpu-latency.service || { echo "[ERROR] Failed to start cpu-latency.service"; FAILED=1; }'
+            ;;
+        *)
+            gpu_clock_cmd='nvidia-smi -lgc 2000'
+            ;;
+    esac
+
+    echo_and_log "[INFO] GPU clock command: ${gpu_clock_cmd}"
+    if [[ $DRYRUN -eq 1 ]]; then
+        echo_and_log "[DRY-RUN] Would install platform-specific GPU and service commands in $DST_FILE"
+    else
+        # Escape sed replacement metacharacters (& means "matched text" in sed replacement)
+        local escaped_cmd="${gpu_clock_cmd//&/\\&}"
+        local escaped_mig_cmd="${mig_mode_cmd//&/\\&}"
+        local escaped_cpu_latency_cmd="${cpu_latency_cmd//&/\\&}"
+        sed -e "s#@GPU_CLOCK_CMD@#${escaped_cmd}#" \
+            -e "s#@MIG_MODE_CMD@#${escaped_mig_cmd}#" \
+            -e "s#@CPU_LATENCY_CMD@#${escaped_cpu_latency_cmd}#" \
+            "$SRC_FILE" | sudo tee "$DST_FILE" > /dev/null
+        sudo chmod +x "$DST_FILE"
+        echo_and_log "  [install_nvidia_script] $DST_FILE"
+    fi
     echo_and_log "[INFO] Installed $DST_FILE"
 }
 
@@ -444,9 +474,10 @@ enable_services() {
     execute sudo systemctl restart nvidia-persistenced.service
 
 
-    # Enable and start CPU latency service
-    execute sudo systemctl enable cpu-latency.service
-    execute sudo systemctl restart cpu-latency.service
+    if [[ $PLATFORM == "NVIDIA_DGX_Spark_P4242" ]]; then
+        execute sudo systemctl enable cpu-latency.service
+        execute sudo systemctl restart cpu-latency.service
+    fi
 
     # Enable and start PTP services
     execute sudo systemctl enable ptp4l.service
@@ -469,12 +500,14 @@ show_status() {
         FAILED=1
     }
 
-    echo ""
-    echo_and_log "[INFO] cpu-latency service status:"
-    systemctl status cpu-latency.service --no-pager --full || {
-        echo_and_log "[WARN] Could not get cpu-latency status"
-        FAILED=1
-    }
+    if [[ $PLATFORM == "NVIDIA_DGX_Spark_P4242" ]]; then
+        echo ""
+        echo_and_log "[INFO] cpu-latency service status:"
+        systemctl status cpu-latency.service --no-pager --full || {
+            echo_and_log "[WARN] Could not get cpu-latency status"
+            FAILED=1
+        }
+    fi
 
     echo ""
     echo_and_log "[INFO] ptp4l service status:"
@@ -729,7 +762,9 @@ main() {
     install_nvidia_script
     create_nvidia_service
     install_nvidia_persistenced
-    create_cpu_latency_service
+    if [[ $PLATFORM == "NVIDIA_DGX_Spark_P4242" ]]; then
+        create_cpu_latency_service
+    fi
     enable_services
 
     echo ""

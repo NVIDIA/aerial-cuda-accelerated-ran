@@ -48,6 +48,7 @@ public:
         float*                     d_rbSnrBuffer;       // buffer containing RB SNRs of all users
 
         // host (CPU) output addresses
+        __half2*                  pDataRxSrsHost;      // host-pinned buffer for raw SRS IQ from buf_st_2
         cuphySrsChEstBuffInfo_t*  h_chEstBuffInfo;
         cuphySrsReport_t*         h_srsReports;        // array containing SRS reports of all users
         float*                    h_rbSnrBuffer;       // buffer containing RB SNRs of all users

@@ -1,0 +1,6 @@
+build/
+logs/
+data/
+**/__pycache__/
+*.o
+*.so

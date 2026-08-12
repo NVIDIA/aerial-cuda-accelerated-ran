@@ -180,13 +180,17 @@ cuphydriver_config:
     # datalake_address: localhost
     # datalake_engine: "MergeTree() PRIMARY KEY (TsTaiNs)"
     # # datalake_drop_tables: 0   # Set to 1 to drop Clickhouse tables at startup
-    # datalake_data_types: [fh, pusch, hest]  # Data types to write to ClickHouse DB (all types always collected in memory for E3 Agent):
-                                            # fh = Fronthaul IQ samples,pusch = PUSCH/FAPI data, hest = channel estimates
+    # datalake_data_types: [fh, pusch, hest, srs_iq, srs, srs_hest]  # Data types to write to ClickHouse DB (all types always collected in memory for E3 Agent):
+                                            # fh = Fronthaul IQ, pusch = PUSCH/FAPI, hest = PUSCH channel estimates,
+                                            # srs_iq = SRS IQ samples, srs = SRS scalars+RbSNR, srs_hest = SRS channel estimates
     # datalake_store_failed_pdu: 0      # Set to 1 to store PDU data even when CRC fails
     # e3_agent_enable: 1          # Enable/disable E3 Agent and dApp capabilities
     # num_rows_fh: 120
     # num_rows_pusch: 200
     # num_rows_hest: 140
+    # num_rows_srs_iq: 40
+    # num_rows_srs: 70
+    # num_rows_srs_hest: 90
     # e3_rep_port: 5555           # E3 reply port for E3AP requests (dApp REQ → Agent REP)
     # e3_pub_port: 5556           # E3 publisher port for indication messages (Agent PUB → dApp SUB)
     # e3_sub_port: 5557           # E3 subscriber port for dApp messages (dApp PUB → Agent SUB)

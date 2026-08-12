@@ -101,12 +101,14 @@ PhyPuschAggr::PhyPuschAggr(
             bDataRx     = std::move(cuphy::buffer<__half2, cuphy::pinned_alloc>(0));
         }
 
-        // Channel estimates buffer allocation - Currently only first UE group
-        // Worst case conservative allocation : max antennas * max layers * max subcarriers * max DMRS estimates
+        // Channel estimates buffer: all UE groups concatenated.
+        // bChannelEsts: worst-case for full cell bandwidth (groups FDM-partition PRBs, total is constant).
+        // bChannelEstSizes: one uint32_t per group.
         int totHestDataSize = MAX_AP_PER_SLOT * MAX_N_BBU_LAYERS_PUSCH_SUPPORTED * (ORAN_MAX_PRB * CUPHY_N_TONES_PER_PRB) * OFDM_SYMBOLS_PER_SLOT;
         if(pdctx->datalake_enabled()) {
             bChannelEsts = std::move(cuphy::buffer<float2, cuphy::pinned_alloc>(totHestDataSize));
-            bChannelEstSizes = std::move(cuphy::buffer<uint32_t, cuphy::pinned_alloc>(1)); // Only first UE group
+            bChannelEstSizes = std::move(cuphy::buffer<uint32_t, cuphy::pinned_alloc>(MAX_N_USER_GROUPS_SUPPORTED));
+            std::memset(bChannelEstSizes.addr(), 0, MAX_N_USER_GROUPS_SUPPORTED * sizeof(uint32_t));
         }
         else {
             bChannelEsts = std::move(cuphy::buffer<float2, cuphy::pinned_alloc>(0));
@@ -141,7 +143,7 @@ PhyPuschAggr::PhyPuschAggr(
             DataOut.pDataRx            = nullptr;
         }
 
-        // Channel estimates API pointers - Currently only first UE group
+        // Channel estimates API pointers
         if(pdctx->datalake_enabled()) {
             DataOut.pChannelEsts       = bChannelEsts.addr();
             DataOut.pChannelEstSizes   = bChannelEstSizes.addr();

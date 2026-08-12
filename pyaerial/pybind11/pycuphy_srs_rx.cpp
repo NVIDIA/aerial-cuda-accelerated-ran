@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -187,6 +187,7 @@ const std::vector<py::array_t<std::complex<float>>>& PySrsRx::run(const std::vec
     m_dataOut.pSrsChEstToL2 = m_srsChEstToL2.data();
     m_dataOut.pRbSnrBuffer = m_rbSnrs.data();
     m_dataOut.pRbSnrBuffOffsets = m_rbSnrBuffOffsets.data();
+    m_dataOut.pDataRxSrs = nullptr;
 
     m_srsDynDbgPrms.enableApiLogging = 0;
 

@@ -36,7 +36,7 @@ cuphydriver_config:
   fh_stats_dump_cpu_core: -1
   pdump_client_thread: -1
   use_green_contexts: 0
-  use_batched_memcpy: 0 # Experimental feature; requires >= CUDA 12.8
+  use_batched_memcpy: 1 # Experimental feature; requires >= CUDA 12.8
   mps_sm_pusch: 100
   mps_sm_pucch: 2
   mps_sm_prach: 2
@@ -180,13 +180,17 @@ cuphydriver_config:
     # datalake_address: localhost
     # datalake_engine: "MergeTree() PRIMARY KEY (TsTaiNs)"
     # # datalake_drop_tables: 0   # Set to 1 to drop Clickhouse tables at startup
-    # datalake_data_types: [fh, pusch, hest]  # Data types to write to ClickHouse DB (all types always collected in memory for E3 Agent):
-                                            # fh = Fronthaul IQ samples,pusch = PUSCH/FAPI data, hest = channel estimates
+    # datalake_data_types: [fh, pusch, hest, srs_iq, srs, srs_hest]  # Data types to write to ClickHouse DB (all types always collected in memory for E3 Agent):
+                                            # fh = Fronthaul IQ, pusch = PUSCH/FAPI, hest = PUSCH channel estimates,
+                                            # srs_iq = SRS IQ samples, srs = SRS scalars+RbSNR, srs_hest = SRS channel estimates
     # datalake_store_failed_pdu: 0      # Set to 1 to store PDU data even when CRC fails
     # e3_agent_enable: 1          # Enable/disable E3 Agent and dApp capabilities
     # num_rows_fh: 120
     # num_rows_pusch: 200
     # num_rows_hest: 140
+    # num_rows_srs_iq: 40
+    # num_rows_srs: 70
+    # num_rows_srs_hest: 90
     # e3_rep_port: 5555           # E3 reply port for E3AP requests (dApp REQ → Agent REP)
     # e3_pub_port: 5556           # E3 publisher port for indication messages (Agent PUB → dApp SUB)
     # e3_sub_port: 5557           # E3 subscriber port for dApp messages (dApp PUB → Agent SUB)
@@ -223,10 +227,10 @@ cuphydriver_config:
       T1a_max_cp_ul_ns: 392000
       T1a_min_cp_ul_ns: 36000
       T1a_max_cp_dl_ns: 464000
-      T1a_min_cp_dl_ns: 7600
-      T1a_max_up_ns: 339000
+      T1a_min_cp_dl_ns: 77000
+      T1a_max_up_ns: 339000 # T1a_max_cp_dl - Tcp_adv_dl
       Ta4_min_ns: 84000
-      Ta4_max_ns: 280000
+      Ta4_max_ns: 280000 # Ta3_max_up + T34max
       Tcp_adv_dl_ns: 125000
       ul_u_plane_tx_offset_ns: 280000
       fh_len_range: 0
@@ -275,10 +279,10 @@ cuphydriver_config:
       T1a_max_cp_ul_ns: 392000
       T1a_min_cp_ul_ns: 36000
       T1a_max_cp_dl_ns: 464000
-      T1a_min_cp_dl_ns: 7600
-      T1a_max_up_ns: 339000
+      T1a_min_cp_dl_ns: 77000
+      T1a_max_up_ns: 339000 # T1a_max_cp_dl - Tcp_adv_dl
       Ta4_min_ns: 84000
-      Ta4_max_ns: 280000
+      Ta4_max_ns: 280000 # Ta3_max_up + T34max
       Tcp_adv_dl_ns: 125000
       ul_u_plane_tx_offset_ns: 280000
       fh_len_range: 0
@@ -327,10 +331,10 @@ cuphydriver_config:
       T1a_max_cp_ul_ns: 392000
       T1a_min_cp_ul_ns: 36000
       T1a_max_cp_dl_ns: 464000
-      T1a_min_cp_dl_ns: 7600
-      T1a_max_up_ns: 339000
+      T1a_min_cp_dl_ns: 77000
+      T1a_max_up_ns: 339000 # T1a_max_cp_dl - Tcp_adv_dl
       Ta4_min_ns: 84000
-      Ta4_max_ns: 280000
+      Ta4_max_ns: 280000 # Ta3_max_up + T34max
       Tcp_adv_dl_ns: 125000
       ul_u_plane_tx_offset_ns: 280000
       fh_len_range: 0
@@ -379,10 +383,10 @@ cuphydriver_config:
       T1a_max_cp_ul_ns: 392000
       T1a_min_cp_ul_ns: 36000
       T1a_max_cp_dl_ns: 464000
-      T1a_min_cp_dl_ns: 7600
-      T1a_max_up_ns: 339000
+      T1a_min_cp_dl_ns: 77000
+      T1a_max_up_ns: 339000 # T1a_max_cp_dl - Tcp_adv_dl
       Ta4_min_ns: 84000
-      Ta4_max_ns: 280000
+      Ta4_max_ns: 280000 # Ta3_max_up + T34max
       Tcp_adv_dl_ns: 125000
       ul_u_plane_tx_offset_ns: 280000
       fh_len_range: 0
@@ -431,10 +435,10 @@ cuphydriver_config:
       T1a_max_cp_ul_ns: 392000
       T1a_min_cp_ul_ns: 36000
       T1a_max_cp_dl_ns: 464000
-      T1a_min_cp_dl_ns: 7600
-      T1a_max_up_ns: 339000
+      T1a_min_cp_dl_ns: 77000
+      T1a_max_up_ns: 339000 # T1a_max_cp_dl - Tcp_adv_dl
       Ta4_min_ns: 84000
-      Ta4_max_ns: 280000
+      Ta4_max_ns: 280000 # Ta3_max_up + T34max
       Tcp_adv_dl_ns: 125000
       ul_u_plane_tx_offset_ns: 280000
       fh_len_range: 0
@@ -483,10 +487,10 @@ cuphydriver_config:
       T1a_max_cp_ul_ns: 392000
       T1a_min_cp_ul_ns: 36000
       T1a_max_cp_dl_ns: 464000
-      T1a_min_cp_dl_ns: 7600
-      T1a_max_up_ns: 339000
+      T1a_min_cp_dl_ns: 77000
+      T1a_max_up_ns: 339000 # T1a_max_cp_dl - Tcp_adv_dl
       Ta4_min_ns: 84000
-      Ta4_max_ns: 280000
+      Ta4_max_ns: 280000 # Ta3_max_up + T34max
       Tcp_adv_dl_ns: 125000
       ul_u_plane_tx_offset_ns: 280000
       fh_len_range: 0
@@ -535,10 +539,10 @@ cuphydriver_config:
       T1a_max_cp_ul_ns: 392000
       T1a_min_cp_ul_ns: 36000
       T1a_max_cp_dl_ns: 464000
-      T1a_min_cp_dl_ns: 7600
-      T1a_max_up_ns: 339000
+      T1a_min_cp_dl_ns: 77000
+      T1a_max_up_ns: 339000 # T1a_max_cp_dl - Tcp_adv_dl
       Ta4_min_ns: 84000
-      Ta4_max_ns: 280000
+      Ta4_max_ns: 280000 # Ta3_max_up + T34max
       Tcp_adv_dl_ns: 125000
       ul_u_plane_tx_offset_ns: 280000
       fh_len_range: 0
@@ -587,10 +591,10 @@ cuphydriver_config:
       T1a_max_cp_ul_ns: 392000
       T1a_min_cp_ul_ns: 36000
       T1a_max_cp_dl_ns: 464000
-      T1a_min_cp_dl_ns: 7600
-      T1a_max_up_ns: 339000
+      T1a_min_cp_dl_ns: 77000
+      T1a_max_up_ns: 339000 # T1a_max_cp_dl - Tcp_adv_dl
       Ta4_min_ns: 84000
-      Ta4_max_ns: 280000
+      Ta4_max_ns: 280000 # Ta3_max_up + T34max
       Tcp_adv_dl_ns: 125000
       ul_u_plane_tx_offset_ns: 280000
       fh_len_range: 0

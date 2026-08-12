@@ -347,138 +347,6 @@ start_mst() {
     execute_or_die sudo mst start
 }
 
-#---------------------------------------------------------------------------------------------------------------------------------------
-# Verify that NIC_DEV (set in versions.sh per platform) matches the NIC present and exists.
-# Uses ibdev2netdev -v to get the chip name and builds the expected pciconf path; compares to NIC_DEV.
-# Returns: 0 if device exists and matches NIC_DEV, 1 otherwise.
-#---------------------------------------------------------------------------------------------------------------------------------------
-check_nic_pciconf_device() {
-    local mtdev_name current_dev
-    mtdev_name=$(ibdev2netdev -v 2>/dev/null | head -1 | awk '{print $3}' | tr -d '(' | tr '[:upper:]' '[:lower:]') || {
-        echo_and_log "[ERROR] Could not get MTDEV name from ibdev2netdev (is OFED/ibdev2netdev available?)" >&2
-        return 1
-    }
-    current_dev="/dev/mst/${mtdev_name}_pciconf0"
-    if [[ -e $current_dev && $current_dev == "$NIC_DEV" ]]; then
-        echo_and_log "[INFO] Found expected device: $NIC_DEV"
-        return 0
-    fi
-    if [[ $DRYRUN -eq 1 ]]; then
-        echo_and_log "[DRY-RUN] Expected device $NIC_DEV not found (ibdev2netdev reports $current_dev)" >&2
-        return 0
-    fi
-    echo_and_log "[ERROR] Expected device $NIC_DEV not found (ibdev2netdev reports $current_dev)" >&2
-    return 1
-}
-
-#=======================================================================================================================================
-# Configure NIC firmware features required for Aerial CUDA-Accelerated RAN
-#=======================================================================================================================================
-configure_nic_firmware() {
-    check_nic_pciconf_device || { FAILED=1; return; }
-
-    # Query current settings (skip in dry-run mode)
-    local needs_update=0
-    local output=""
-    if [[ $DRYRUN -ne 1 ]]; then
-        output=$(sudo mlxconfig -d "$NIC_DEV" q | grep -E "CQE_COMPRESSION|PROG_PARSE_GRAPH|FLEX_PARSER_PROFILE_ENABLE|REAL_TIME_CLOCK_ENABLE|ACCURATE_TX_SCHEDULER")
-
-        echo_and_log "[INFO] Current NIC firmware settings:"
-        echo_and_log "$output"
-
-        # Check if updates are needed
-        if ! echo "$output" | grep -q "FLEX_PARSER_PROFILE_ENABLE.*4"; then
-            echo_and_log "[INFO] FLEX_PARSER_PROFILE_ENABLE needs update (want: 4)"
-            needs_update=1
-        fi
-        if ! echo "$output" | grep -qE "PROG_PARSE_GRAPH.*(True|1)"; then
-            echo_and_log "[INFO] PROG_PARSE_GRAPH needs update (want: True)"
-            needs_update=1
-        fi
-        if ! echo "$output" | grep -qE "ACCURATE_TX_SCHEDULER.*(True|1)"; then
-            echo_and_log "[INFO] ACCURATE_TX_SCHEDULER needs update (want: True)"
-            needs_update=1
-        fi
-        if ! echo "$output" | grep -qE "CQE_COMPRESSION.*(AGGRESSIVE|1)"; then
-            echo_and_log "[INFO] CQE_COMPRESSION needs update (want: AGGRESSIVE)"
-            needs_update=1
-        fi
-        if ! echo "$output" | grep -qE "REAL_TIME_CLOCK_ENABLE.*(True|1)"; then
-            echo_and_log "[INFO] REAL_TIME_CLOCK_ENABLE needs update (want: True)"
-            needs_update=1
-        fi
-
-        if [[ $needs_update -eq 0 ]]; then
-            echo_and_log "[INFO] Skipping NIC config changes"
-        fi
-    else
-        echo_and_log "[DRY-RUN] sudo mlxconfig -d $NIC_DEV and grep a bunch of stuff"
-    fi
-
-    if [[ $needs_update -eq 1 ]]; then
-        echo_and_log "[INFO] Updating NIC firmware settings..."
-        if [[ $DRYRUN -ne 1 ]]; then
-
-            # eCPRI flow steering enable
-            execute "sudo mlxconfig -d $NIC_DEV --yes set FLEX_PARSER_PROFILE_ENABLE=4 > /dev/null"
-            execute "sudo mlxconfig -d $NIC_DEV --yes set PROG_PARSE_GRAPH=1 > /dev/null"
-
-            # Accurate TX scheduling enable
-            execute "sudo mlxconfig -d $NIC_DEV --yes set REAL_TIME_CLOCK_ENABLE=1 > /dev/null"
-            execute "sudo mlxconfig -d $NIC_DEV --yes set ACCURATE_TX_SCHEDULER=1 > /dev/null"
-
-            # Maximum level of CQE compression
-            execute "sudo mlxconfig -d $NIC_DEV --yes set CQE_COMPRESSION=1 > /dev/null"
-        fi
-    fi
-
-    # Reset NIC to apply changes. Without this it doesn't matter if the settings are correct
-    if [[ $needs_update -eq 1 || $DRYRUN -eq 1 ]]; then
-        echo_and_log "[INFO] Resetting NIC to apply firmware changes. This may cause a reboot."
-        if [[ $DRYRUN -ne 1 ]]; then
-            execute "sudo mlxfwreset -d $NIC_DEV --yes --level 3 r > /dev/null"
-        else
-            echo_and_log "[DRY-RUN] sudo mlxfwreset -d $NIC_DEV --yes --level 3 r"
-        fi
-    else
-        echo_and_log "[INFO] NIC settings already correct, skipping reset"
-    fi
-
-    # Verify parameters after update (skip in dry-run mode)
-    echo_and_log "[INFO] Verifying NIC firmware parameters..."
-    if [[ $DRYRUN -ne 1 ]]; then
-        output=$(sudo mlxconfig -d "$NIC_DEV" q | grep -E "CQE_COMPRESSION|PROG_PARSE_GRAPH|FLEX_PARSER_PROFILE_ENABLE|REAL_TIME_CLOCK_ENABLE|ACCURATE_TX_SCHEDULER")
-        echo_and_log "$output"
-
-        # Verify expected values
-        if ! echo "$output" | grep -q "FLEX_PARSER_PROFILE_ENABLE.*4"; then
-            echo_and_log "[WARN] FLEX_PARSER_PROFILE_ENABLE not set to 4"
-            FAILED=1
-        fi
-        if ! echo "$output" | grep -qE "PROG_PARSE_GRAPH.*(True|1)"; then
-            echo_and_log "[WARN] PROG_PARSE_GRAPH not enabled"
-            FAILED=1
-        fi
-        if ! echo "$output" | grep -qE "ACCURATE_TX_SCHEDULER.*(True|1)"; then
-            echo_and_log "[WARN] ACCURATE_TX_SCHEDULER not enabled"
-            FAILED=1
-        fi
-        if ! echo "$output" | grep -qE "CQE_COMPRESSION.*(AGGRESSIVE|1)"; then
-            echo_and_log "[WARN] CQE_COMPRESSION not set to AGGRESSIVE"
-            FAILED=1
-        fi
-        if ! echo "$output" | grep -qE "REAL_TIME_CLOCK_ENABLE.*(True|1)"; then
-            echo_and_log "[WARN] REAL_TIME_CLOCK_ENABLE not enabled"
-            FAILED=1
-        fi
-
-        if [[ $FAILED -ne 1 ]]; then
-            echo_and_log "[INFO] All NIC firmware parameters configured successfully"
-        fi
-    fi
-
-}
-
 # Display version and status information
 show_status() {
     echo_and_log "[INFO] Docker version (expected: ${DOCKER_VERSION}):"
@@ -898,9 +766,23 @@ main() {
     else
         install_doca_host
         start_mst
-        configure_nic_firmware
         install_rcu_affinity_manager
+        # Persist this stage before the intentional Spark reboot exit so the
+        # next run resumes with post-reboot firmware verification.
         _stamp_step "doca"
+
+        if [[ $PLATFORM == "NVIDIA_DGX_Spark_P4242" ]]; then
+            if [[ $DRYRUN -eq 1 ]]; then
+                echo_and_log "[DRY-RUN] A system reboot would be required before verifying the updated NIC firmware"
+            else
+                echo ""
+                echo "============================================"
+                echo_and_log "[IMPORTANT] DOCA and mlnx-fw-updater installation completed."
+                echo_and_log "[IMPORTANT] Reboot the system so the NIC firmware update can take effect, then run make install again."
+                echo "============================================"
+                exit 2
+            fi
+        fi
     fi
 
     # Group 2: GPU driver + GDRCopy (download-heavy, skip if already done)

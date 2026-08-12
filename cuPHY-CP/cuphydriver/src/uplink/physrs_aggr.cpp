@@ -114,9 +114,19 @@ PhySrsAggr::PhySrsAggr(
             DataIn.pTDataRx[idx].pAddr = nullptr;
         }
         dyn_params.pDataIn = &DataIn;
-        
+
+        // SRS IQ host buffer: copies buf_st_2 GPU->host (mirrors PUSCH bDataRx pattern)
+        int totSrsIqSize = (ORAN_MAX_PRB * CUPHY_N_TONES_PER_PRB) * ORAN_MAX_SRS_SYMBOLS * MAX_AP_PER_SLOT * UL_SRS_MAX_CELLS_PER_SLOT;
+        if(pdctx->datalake_enabled()) {
+            bDataRxSrs  = std::move(cuphy::buffer<__half2, cuphy::pinned_alloc>(totSrsIqSize));
+            DataOut.pDataRxSrs = bDataRxSrs.addr();
+        } else {
+            bDataRxSrs  = std::move(cuphy::buffer<__half2, cuphy::pinned_alloc>(0));
+            DataOut.pDataRxSrs = nullptr;
+        }
+
         // Data OUT
-        dyn_params.pDataOut = &DataOut;  
+        dyn_params.pDataOut = &DataOut;
         
         statusOut = {cuphySrsStatusType_t::CUPHY_SRS_STATUS_SUCCESS_OR_UNTRACKED_ISSUE, MAX_UINT16, MAX_UINT16};
         dyn_params.pStatusOut = &statusOut;
@@ -777,8 +787,12 @@ int PhySrsAggr::callback(const std::array<bool,UL_MAX_CELLS_PER_SLOT>& srs_order
 
         auto srs = getDynParams();
 
-        // Only for compilation to run pass actual cuphyPuschDataOut_t* struct
-        // nCRC calculated on the GPU with cuPHYTools kernel
+        // Notify DataLake that SRS data is ready. This only copies pointers and signals the worker thread.
+        if(pdctx->getDataLake() != nullptr) {
+            pdctx->getDataLake()->notifySrs(aggr_slot_params->si, srs, &DataOut, &static_params);
+        }
+
+        // Only for compilation to run pass actual cuphySrsDataOut_t* struct
         ul_cb.srs_cb_fn(ul_cb.srs_cb_context, msg, *(aggr_slot_params->si), *srs, &DataOut, &static_params, srs_order_cell_timeout_list);
     }
 

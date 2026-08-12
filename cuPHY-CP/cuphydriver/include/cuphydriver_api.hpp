@@ -341,6 +341,9 @@ struct context_config
     uint32_t num_rows_fh;                                       ///< Number of rows per batch for fronthaul datalake ingestion
     uint32_t num_rows_pusch;                                    ///< Number of rows per batch for PUSCH datalake ingestion
     uint32_t num_rows_hest;                                     ///< Number of rows per batch for channel estimation datalake ingestion
+    uint32_t num_rows_srs_iq;                                   ///< Number of rows per batch for SRS IQ datalake ingestion
+    uint32_t num_rows_srs;                                      ///< Number of rows per batch for SRS scalar+RbSNR datalake ingestion
+    uint32_t num_rows_srs_hest;                                 ///< Number of rows per batch for SRS Hest datalake ingestion
     uint8_t e3_agent_enabled;                                   ///< Enable E3 agent for RIC integration (0=disabled, 1=enabled)
     uint16_t e3_rep_port;                                       ///< E3 agent reply port number
     uint16_t e3_pub_port;                                       ///< E3 agent publish port number

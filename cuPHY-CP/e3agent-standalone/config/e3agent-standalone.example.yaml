@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Standalone E3 Agent environment configuration. Unknown keys are rejected.
+
+mode: synth                 # synth | replay -- selects which block below is used
+log_level: INF               # VRB | DBG | INF | WRN | ERR | FAT
+
+agent:                       # E3AP ZMQ ports (mirror cuphycontroller data_config)
+  rep_port: 5555             # dApp REQ -> Agent REP
+  pub_port: 5556             # Agent PUB -> dApp SUB (indications)
+  sub_port: 5557             # dApp PUB -> Agent SUB
+
+rows:                        # SHM ring depths (num_rows_*); read back from SHM header
+  fh: 120
+  pusch: 180
+  hest: 140
+  srs_iq: 40
+  srs: 70
+  srs_hest: 90
+
+cpu:
+  feeder_core: 12            # feeder threads; -1 = no pinning
+
+synth:                       # used when mode: synth
+  slot_tick_us: 500          # numerology mu=1 (30 kHz SCS)
+  tdd_pattern: "DDDSU"       # D=downlink (skip), S=special (skip), U=uplink (PUSCH)
+  srs_periodicity_ms: 40     # SRS cadence; SRS rides a U slot
+  duration_slots: 0          # 0 = run forever
+
+replay:                      # used when mode: replay
+  path: /data/session.trace  # in-container path (compose mounts ./data:/data:ro)
+  loops: 0                   # 0 = loop forever; pacing from ts_tai delta (clamp 1 s)

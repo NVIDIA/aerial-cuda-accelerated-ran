@@ -1,0 +1,5 @@
+build/
+.aerial_src/
+__pycache__/
+logs/*.log
+data/*.trace

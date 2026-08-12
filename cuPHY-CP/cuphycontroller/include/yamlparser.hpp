@@ -368,6 +368,9 @@ struct cuphydriver_config
     uint32_t num_rows_fh;
     uint32_t num_rows_pusch;
     uint32_t num_rows_hest;
+    uint32_t num_rows_srs_iq;
+    uint32_t num_rows_srs;
+    uint32_t num_rows_srs_hest;
     uint8_t e3_agent_enabled;
     uint16_t e3_rep_port;
     uint16_t e3_pub_port;
@@ -509,6 +512,9 @@ public:
     uint32_t get_cuphydriver_num_rows_fh();
     uint32_t get_cuphydriver_num_rows_pusch();
     uint32_t get_cuphydriver_num_rows_hest();
+    uint32_t get_cuphydriver_num_rows_srs_iq();
+    uint32_t get_cuphydriver_num_rows_srs();
+    uint32_t get_cuphydriver_num_rows_srs_hest();
     uint8_t get_cuphydriver_e3_agent_enabled();
     uint16_t get_cuphydriver_e3_rep_port();
     uint16_t get_cuphydriver_e3_pub_port();

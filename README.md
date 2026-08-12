@@ -31,8 +31,9 @@ aerial-cuda-accelerated-ran/
 │   ├── cuphyl2adapter/      # L2 adapter
 │   ├── ru-emulator/         # Radio Unit emulator
 │   ├── testMAC/            # Test MAC implementation
-│   └── container/          # Container build scripts and recipes
-│   └── data_lake/          # data lake and E3 agent
+│   ├── container/          # Container build scripts and recipes
+│   ├── data_lake/          # data lake and E3 agent
+│   └── e3agent-standalone/ # E3 Agent standalone
 ├── cuMAC/              # CUDA-accelerated L2 Layer
 ├── cuMAC-CP/           # MAC Control Plane components
 ├── pyaerial/           # Python API and ML/AI tools

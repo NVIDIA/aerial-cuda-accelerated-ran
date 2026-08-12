@@ -358,20 +358,24 @@ PhyDriverCtx::PhyDriverCtx(const context_config& ctx_cfg) :
             ctx_cfg.num_rows_fh,
             ctx_cfg.num_rows_pusch,
             ctx_cfg.num_rows_hest,
+            ctx_cfg.num_rows_srs_iq,
+            ctx_cfg.num_rows_srs,
+            ctx_cfg.num_rows_srs_hest,
             ctx_cfg.e3_agent_enabled,
             ctx_cfg.e3_rep_port,
             ctx_cfg.e3_pub_port,
             ctx_cfg.e3_sub_port,
             ctx_cfg.datalake_drop_tables));
 
+        // PUSCH/FH worker thread
         std::thread t = std::thread(waitForLakeData, dataLake.get());
-        datalake_thread.swap(t);
+        datalake_pusch_thread.swap(t);
 
-        int name_st = pthread_setname_np(datalake_thread.native_handle(), "datalake_thread");
+        int name_st = pthread_setname_np(datalake_pusch_thread.native_handle(), "datalake_pusch");
 
         if (name_st != 0 )
         {
-            NVLOGE_FMT(TAG, AERIAL_THREAD_API_EVENT ,"datalake_thread Thread pthread_setname_np failed with status: {}",std::strerror(name_st));
+            NVLOGE_FMT(TAG, AERIAL_THREAD_API_EVENT ,"datalake_pusch Thread pthread_setname_np failed with status: {}",std::strerror(name_st));
         }
 
         sched_param sch;
@@ -382,10 +386,29 @@ PhyDriverCtx::PhyDriverCtx(const context_config& ctx_cfg) :
         cpu_set_t cpuset;
         CPU_ZERO(&cpuset);
         CPU_SET(data_core, &cpuset);
-        status = pthread_setaffinity_np(datalake_thread.native_handle(), sizeof(cpu_set_t), &cpuset);
+        status = pthread_setaffinity_np(datalake_pusch_thread.native_handle(), sizeof(cpu_set_t), &cpuset);
         if(status)
         {
-            NVLOGE_FMT(TAG, AERIAL_THREAD_API_EVENT, "datalake_thread setaffinity_np  failed with status : {}" , std::strerror(status));
+            NVLOGE_FMT(TAG, AERIAL_THREAD_API_EVENT, "datalake_pusch setaffinity_np failed with status : {}" , std::strerror(status));
+        }
+
+        // SRS worker thread — same data_core, parallel to PUSCH worker
+        std::thread t_srs = std::thread(waitForLakeDataSrs, dataLake.get());
+        datalake_srs_thread.swap(t_srs);
+
+        name_st = pthread_setname_np(datalake_srs_thread.native_handle(), "datalake_srs");
+        if (name_st != 0)
+        {
+            NVLOGE_FMT(TAG, AERIAL_THREAD_API_EVENT, "datalake_srs Thread pthread_setname_np failed with status: {}", std::strerror(name_st));
+        }
+
+        cpu_set_t cpuset_srs;
+        CPU_ZERO(&cpuset_srs);
+        CPU_SET(data_core, &cpuset_srs);
+        status = pthread_setaffinity_np(datalake_srs_thread.native_handle(), sizeof(cpu_set_t), &cpuset_srs);
+        if(status)
+        {
+            NVLOGE_FMT(TAG, AERIAL_THREAD_API_EVENT, "datalake_srs setaffinity_np failed with status : {}", std::strerror(status));
         }
     }
 

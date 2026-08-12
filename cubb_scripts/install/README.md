@@ -2,22 +2,79 @@
 
 ## Quick start
 
-1. **Prepare and reboot** (sets up network interfaces and installs the Aerial CUDA kernel; a reboot is required to load the new kernel):
+First-time provisioning must be run in stages because the required reboot or power cycle interrupts the installation. Do not expect `make all` to complete in one invocation.
+
+### DGX Spark
+
+1. Install `make` if needed, prepare the Aerial CUDA kernel, and reboot to load it:
 
    ```bash
-   sudo apt update && sudo apt install -y build-essential #Required on systems where make isn't part of the base install
-   make prepare && sudo reboot
+   sudo apt update && sudo apt install -y build-essential
+   make prepare
+   sudo reboot
    ```
 
-
-2. **After reboot**, run the full installation with your RU MAC address:
+2. Install DOCA and the NIC firmware, then reboot so the firmware update takes effect:
 
    ```bash
-   RU_MAC=<yourWncMac> make all
+   make install
+   sudo reboot
+   ```
+
+3. Resume and complete the installation:
+
+   ```bash
+   make install
+   ```
+
+4. Build and start the software:
+
+   ```bash
+   RU_MAC=<yourWncMac> make build
+   RU_MAC=<yourWncMac> make start_all
+   ```
+
+### GH200
+
+1. Install `make` if needed, prepare the Aerial CUDA kernel, and reboot to load it:
+
+   ```bash
+   sudo apt update && sudo apt install -y build-essential
+   make prepare
+   sudo reboot
+   ```
+
+2. Install the BFB on both BF3 devices:
+
+   ```bash
+   make install
+   ```
+
+   Perform a full cold power cycle, then power the host back on. A soft reboot is not sufficient.
+
+3. Resume the installation to apply the BF3 NIC settings:
+
+   ```bash
+   make install
+   ```
+
+   Perform a second full cold power cycle, then power the host back on.
+
+4. Resume and complete the installation:
+
+   ```bash
+   make install
+   ```
+
+5. Build and start the software:
+
+   ```bash
+   RU_MAC=<yourWncMac> make build
+   RU_MAC=<yourWncMac> make start_all
    ```
 
 Replace `<yourWncMac>` with your WNC RU MAC address (e.g. `e8:c7:cf:ac:58:32`).
-If using a different RU, you may have to change PCP and VLAN in cuphycontroller_P5G_WNC_DGX.yaml before running `make all` or `make start` on the DGX-Spark
+If using a different RU, you may have to change PCP and VLAN in `cuphycontroller_P5G_WNC_DGX.yaml` before running `make build` or `make start_all` on DGX Spark.
 
 ---
 
@@ -25,9 +82,9 @@ If using a different RU, you may have to change PCP and VLAN in cuphycontroller_
 
 | Target | Function |
 |--------|----------|
-| **prepare** | Runs `net` and `kernel`: sets up network interfaces and installs the Aerial CUDA kernel. **Reboot after this**, then run `make all`. |
-| **all** | Full flow: `install` -> `build` -> `start_all`. Installs drivers and services, builds Aerial SDK and OAI, then starts gNB and CN5G. Use with `RU_MAC=<mac>`. |
-| **install** | Runs `drivers` and `services`: installs DOCA, OFED, GPU drivers, PTP, and system services. |
+| **prepare** | Installs the Aerial CUDA kernel. Reboot after this, then follow the platform-specific staged flow above. |
+| **all** | Convenience flow: `install` -> `build` -> `start_all`. On a first-time installation it stops at required restart boundaries, so use the staged flow above. |
+| **install** | Resumable installation of drivers, network configuration, NIC firmware, and system services. It stops when a platform restart is required; run it again afterward to resume. |
 | **net** | Sets up network interfaces (e.g. `aerial0x`). |
 | **kernel** | Installs the Aerial CUDA kernel. Reboot required after this if the kernel was updated. |
 | **drivers** | Installs DOCA, OFED, and GPU drivers. Prompts for confirmation; ensure PTP, VLAN, RU peer MAC, and Docker login are configured first. |
@@ -44,7 +101,7 @@ If using a different RU, you may have to change PCP and VLAN in cuphycontroller_
 
 ## Options
 
-- **DRYRUN=1** - Show commands without executing (e.g. `make all DRYRUN=1`).
+- **DRYRUN=1** - Show commands without executing (e.g. `make install DRYRUN=1`).
 - **VERBOSE=1** - Print commands before executing.
 - **RU_MAC=aa:bb:cc:dd:ee:ff** - Set RU MAC address for gNB/OAI (required for `all`, `start_gnb`, `start_all`, and when building OAI with a specific MAC).
 - **PROFILE=name** - Aerial build profile file: `oai.conf`, `fapi_10_02.conf`, `fapi_10_04.conf`, or a custom `<name>.conf` (see **Build profiles** below).
@@ -62,13 +119,6 @@ The Aerial build can use different configurations (OAI L2+ default, FAPI 10_02 o
 
 - **Profile variable:**  
   Profiles are defined in `install/cmake-profiles/<name>.conf` (each sets `BUILD_PRESET` and `PROFILE_CMAKE_FLAGS`). See `install/cmake-profiles/README.md` for adding custom profiles.
-
-## Examples
-
-```bash
-make prepare && sudo reboot
-RU_MAC=e8:c7:cf:ac:58:32 make all
-```
 
 ## Scripts
 

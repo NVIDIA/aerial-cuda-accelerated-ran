@@ -32,8 +32,11 @@ for iface in $AERIAL_INTERFACES; do
     ethtool -A "$iface" rx off tx off 2>/dev/null || true
 done
 
-# Force max frequency on all GPUs
-nvidia-smi -lgc 2000 || { echo "[ERROR] Failed to lock GPU frequency"; FAILED=1; }
+# Force max frequency on all GPUs (command is substituted per platform during install)
+@GPU_CLOCK_CMD@ || { echo "[ERROR] Failed to lock GPU frequency"; FAILED=1; }
+
+# Configure MIG mode when required by the platform guide
+@MIG_MODE_CMD@
 
 # Allow real-time tasks to take 100% CPU
 echo -1 > /proc/sys/kernel/sched_rt_runtime_us || { echo "[ERROR] Failed to configure RT scheduling"; FAILED=1; }
@@ -48,8 +51,8 @@ echo 0 | tee /proc/sys/kernel/timer_migration > /dev/null || { echo "[ERROR] Fai
 # Enable DPDK mapping of GPU memory
 modprobe nvidia-peermem 2>/dev/null || lsmod | grep -q nvidia_peermem || { echo "[ERROR] Failed to load nvidia-peermem"; FAILED=1; }
 
-# Start CPU DMA latency service
-systemctl start cpu-latency.service || { echo "[ERROR] Failed to start cpu-latency.service"; FAILED=1; }
+# Start the CPU DMA latency service on platforms that require it
+@CPU_LATENCY_CMD@
 
 # Exit with status
 [[ $FAILED -eq 1 ]] && { echo "[ERROR] Completed with errors"; exit 1; }

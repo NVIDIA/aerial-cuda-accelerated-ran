@@ -380,6 +380,7 @@ void SrsRx::setupCmn(const cuphySrsDynPrms_t *pDynPrm)
 
     // Output parameters:
     m_outputPrms.cpuCopyOn           = pDynPrm->cpuCopyOn;
+    m_outputPrms.pDataRxSrsHost      = pDynPrm->pDataOut->pDataRxSrs;
     m_outputPrms.h_chEstBuffInfo     = pDynPrm->pDataOut->pChEstBuffInfo;
     m_outputPrms.h_srsReports        = pDynPrm->pDataOut->pSrsReports;
     m_outputPrms.h_rbSnrBuffer       = pDynPrm->pDataOut->pRbSnrBuffer;
@@ -424,6 +425,27 @@ void SrsRx::setupCmn(const cuphySrsDynPrms_t *pDynPrm)
  cuphyStatus_t SrsRx::copyOutputToCPU(cudaStream_t cuStream) {
     if(m_nSrsUes > 0) {
         m_batchedMemcpyHelper.reset(); // reset for upcoming batch of updateMemcpy calls
+
+        // Add raw SRS IQ copy (buf_st_2 GPU->host) for DataLake. The input descriptor is
+        // sized for the worst-case antenna ports, but buf_st_2 only holds nRxAntSrs ports,
+        // so copy per cell using the active ports to avoid over-reading the source.
+        if(m_outputPrms.pDataRxSrsHost) {
+            int dataRxDims[3] = {0, 0, 0};
+            cuphyGetTensorDescriptor(m_hPrmDataRx[0].desc, 3, nullptr, nullptr, dataRxDims, nullptr);
+            size_t perAntElems = static_cast<size_t>(dataRxDims[0]) * dataRxDims[1];
+            size_t dstOffsetElems = 0;
+            for(int32_t cellIdx = 0; cellIdx < m_nCells; ++cellIdx) {
+                size_t cellElems = perAntElems * m_srsCellPrmsVec[cellIdx].nRxAntSrs;
+                m_batchedMemcpyHelper.updateMemcpy(
+                    m_outputPrms.pDataRxSrsHost + dstOffsetElems,
+                    m_hPrmDataRx[cellIdx].pAddr,
+                    cellElems * sizeof(__half2),
+                    cudaMemcpyDeviceToHost,
+                    cuStream
+                );
+                dstOffsetElems += cellElems;
+            }
+        }
 
         // Add SRS reports copy
         m_batchedMemcpyHelper.updateMemcpy(

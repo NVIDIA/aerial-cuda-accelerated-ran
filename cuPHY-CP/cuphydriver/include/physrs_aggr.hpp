@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -178,6 +178,7 @@ public:
 
 protected:
     cuphy::tensor_device tDataRxInput[UL_SRS_MAX_CELLS_PER_SLOT];                  ///< Input tensor descriptors for received SRS data (per-cell)
+    cuphy::buffer<__half2, cuphy::pinned_alloc> bDataRxSrs;                         ///< Pinned host buffer for raw SRS IQ (GPU->host, gated on DataLake)
     cuphy::buffer<cuphySrsReport_t, cuphy::pinned_alloc> srsReport;                 ///< Pinned host buffer for SRS processing reports (timing, SNR, status)
     cuphy::buffer<cuphySrsChEstToL2_t, cuphy::pinned_alloc> srsChEstToL2;          ///< Pinned host buffer for channel estimation metadata passed to L2
     cuphy::buffer<float, cuphy::pinned_alloc> rbSnrBuffer;                          ///< Pinned host buffer for per-PRB SNR values

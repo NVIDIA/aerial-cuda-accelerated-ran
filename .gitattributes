@@ -7,4 +7,4 @@ cuPHY/examples/ch_est/channel_estimator.onnx filter=lfs diff=lfs merge=lfs -text
 cuPHY/examples/ch_est/ls_chs.npy filter=lfs diff=lfs merge=lfs -text
 cuPHY/examples/ch_est/model_SNR=20.0_3.path filter=lfs diff=lfs merge=lfs -text
 cuPHY/examples/ch_est/true_chs.npy filter=lfs diff=lfs merge=lfs -text
-5GModel/aerial_mcore/aerial_pkg/dist/aerial_mcore-0.20261.687897.687897-py3-none-any.whl filter=lfs diff=lfs merge=lfs -text
+5GModel/aerial_mcore/aerial_pkg/dist/aerial_mcore-0.20261.567096.567096-py3-none-any.whl filter=lfs diff=lfs merge=lfs -text

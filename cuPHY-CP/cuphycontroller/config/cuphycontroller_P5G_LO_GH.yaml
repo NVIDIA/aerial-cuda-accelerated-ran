@@ -1,0 +1,596 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+aerial_sdk_version: 26-1-cubb
+l2adapter_filename: l2_adapter_config_P5G_GH.yaml
+aerial_metrics_backend_address: 127.0.0.1:8081
+
+# CPU core shared by all low-priority threads
+low_priority_core: 10
+enable_ptp_svc_monitoring: 0
+ptp_rms_threshold: 20 #ns
+nic_tput_alert_threshold_mbps: 85000
+
+cuphydriver_config:
+  standalone: 0
+  validation: 0
+  num_slots: 8
+  log_level: DBG
+  profiler_sec: 0
+  dpdk_thread: 10
+  dpdk_verbose_logs: 0
+  accu_tx_sched_res_ns: 500
+  accu_tx_sched_disable: 0 #Flag applicable only for CX6-DX : BF3/CX7 HW and beyond support accurate send scheduling directly on timestamp, for CX6-DX this is implemented via software emulation
+  fh_stats_dump_cpu_core: -1
+  pdump_client_thread: -1
+  use_green_contexts: 0
+  use_batched_memcpy: 1 # Experimental feature; requires >= CUDA 12.8
+  mps_sm_pusch: 100
+  mps_sm_pucch: 2
+  mps_sm_prach: 2
+  mps_sm_ul_order: 20
+  mps_sm_pdsch: 102
+  mps_sm_pdcch: 10
+  mps_sm_pbch: 2
+  mps_sm_gpu_comms: 16
+  mps_sm_srs: 16
+  pdsch_fallback: 0
+  dpdk_file_prefix: cuphycontroller
+  nics:
+    - nic: '0000:01:00.0'
+      mtu: 8192
+      cpu_mbufs: 196608
+      uplane_tx_handles: 64
+      txq_size: 8192
+      rxq_size: 16384
+      gpu: 0
+  cus_port_failover: 0
+  gpus:
+    - 0
+    # Set GPUID to the GPU sharing the PCIe switch as NIC
+    # run nvidia-smi topo -m to find out which GPU
+  workers_ul: [4,5]
+  workers_dl: [6,7,8]
+  debug_worker: -1
+  workers_sched_priority: 95
+  prometheus_thread: -1
+  start_section_id_srs: 3072
+  start_section_id_prach: 2048
+  enable_ul_cuphy_graphs: 1
+  enable_dl_cuphy_graphs: 1
+  ul_order_kernel_mode: 0 # 0: Ping-Pong, 1: dual CTA
+  ul_order_timeout_cpu_ns: 8000000
+  ul_order_timeout_log_interval_ns: 1000000000
+  ul_order_timeout_gpu_ns: 3000000
+  ul_order_timeout_gpu_srs_ns: 5200000
+  ul_srs_aggr3_task_launch_offset_ns: 500000
+  ul_order_timeout_gpu_log_enable: 0
+  ul_order_max_rx_pkts: 512
+  ul_order_rx_pkts_timeout_ns: 100000
+  cplane_disable: 0
+  gpu_init_comms_dl: 1
+  cell_group: 1
+  cell_group_num: 1
+  fix_beta_dl: 0
+  bfw_beta_prescaler: 16384
+  pusch_workCancelMode: 2  # set cuphyPuschStatPrms_t workCancelMode field to PUSCH_DEVICE_GRAPHS; this only sets the mode and does not cancel work;
+                           # work cancellation (i.e., not launching some of the device graphs) can only occur after an explicit internal
+                           # memory write is timely observed by a PUSCH graph.
+  pusch_sinr: 2
+  pusch_rssi: 1
+  pusch_tdi: 1
+  pusch_cfo: 1
+  pusch_dftsofdm: 0
+  pusch_to: 1
+  pusch_select_eqcoeffalgo: 3
+  pusch_select_chestalgo: 1
+  pusch_enable_perprgchest: 0
+  pusch_tbsizecheck: 1
+  pusch_deviceGraphLaunchEn: 1
+  pusch_waitTimeOutPreEarlyHarqUs: 3000
+  pusch_waitTimeOutPostEarlyHarqUs: 3000
+  puxch_polarDcdrListSz: 8
+  enable_cpu_task_tracing: 0
+  enable_prepare_tracing: 0
+  disable_empw: 0 #1=>Disables Multi packet WQE feature
+  cqe_tracer_config:
+    enable_dl_cqe_tracing: 0
+    cqe_trace_cell_mask: 1 #[64 bit mask: Bit0->Cell0, Bit1->Cell1...]
+    cqe_trace_slot_mask: 196800 #[20 bit mask: Bit0->Slot0, Bit1->Slot1...] 196800=>All *6,*7 DL Slots
+  ul_rx_pkt_tracing_level: 0
+  ul_rx_pkt_tracing_level_srs: 0
+  pmu_metrics: 0 #Enable and select PMU metrics, 0=disabled, 1=General Counters (platform agnostic), 2=Topdown Metrics (Grace only), 3=Cache Metrics (Grace only)
+  enable_h2d_copy_thread: 1
+  h2d_copy_thread_cpu_affinity : 11
+  h2d_copy_thread_sched_priority : 95 #0->SCHED_OTHER, >0->Actual
+  split_ul_cuda_streams: 0 # 1=Put UL slot 4 and slot 5 on different streams for DDDSUUDDDD pattern
+  serialize_pucch_pusch: 0 # 1=Force serialization of PUSCH/PUCCH
+                           # Note: for Early Harq (EH) order is PUSCH EH -> PUCCH -> PUSCH non EH
+                           #       for non-Early Harq order is PUCCH -> all PUSCH processing
+  aggr_obj_non_avail_th: 5 # Threshold for consecutive non-availability of Aggregated objects(UL/DL) or DL/UL buffers 
+  dl_wait_th_ns:
+    - 500000  #H2D copy wait threshold
+    - 4000000 #cuPHY DL channel wait threshold
+  sendCPlane_timing_error_th_ns : 0
+  sendCPlane_ulbfw_backoff_th_ns: 300000    # ULBFW must be completed by cplane send time - this is the backoff time
+  sendCPlane_dlbfw_backoff_th_ns: 300000    # DLBFW must be completed by cplane send time - this is the backoff time
+  pusch_forcedNumCsi2Bits: 0
+  mMIMO_enable: 0
+  enable_srs: 1
+  ue_mode: 0
+  mCh_segment_proc_enable: 0
+  pusch_aggr_per_ctx: 3
+  prach_aggr_per_ctx: 2
+  pucch_aggr_per_ctx: 4
+  srs_aggr_per_ctx: 3
+  ul_input_buffer_per_cell: 10
+  ul_input_buffer_per_cell_srs: 6
+  max_harq_pools: 384
+  max_harq_tx_count_bundled: 10
+  max_harq_tx_count_non_bundled: 4
+  ok_testbench_config:
+    enable_ok_tb: 0
+    num_ok_tb_slot: 0 #Presently not used  
+  max_ru_unhealthy_ul_slots: 100
+  srs_chest_algo_type: 0
+  srs_chest_tol2_normalization_algo_type: 1
+  srs_chest_tol2_constant_scaler: 32768.0
+  bfw_power_normalization_alg_selector: 1
+  total_num_srs_chest_buffers: 6144
+  send_static_bfw_wt_all_cplane: 1
+  ul_pcap_capture_enable: 0
+  ul_pcap_capture_thread_cpu_affinity: 10
+  ul_pcap_capture_thread_sched_priority: 95
+  pcap_logger_ul_cplane_enable: 0
+  pcap_logger_dl_cplane_enable: 0
+  pcap_logger_thread_cpu_affinity: 10
+  pcap_logger_thread_sched_prio: 95
+  pcap_logger_file_save_dir: ./
+  dlc_bfw_enable_divide_per_cell: 0 # Enable/disable dividing DL BFW C-Plane transmission window among multiple cells in a slot
+  ulc_bfw_enable_divide_per_cell: 0 # Enable/disable dividing UL BFW C-Plane transmission window among multiple cells in a slot
+  dlc_alloc_cplane_bfw_txq: 0 # Allocates a second separate queue for BFW DL C-Plane transmission 
+  ulc_alloc_cplane_bfw_txq: 1 # Allocates a second separate queue for BFW UL C-Plane transmission 
+  #static beam id range
+  static_beam_id_start: 1
+  static_beam_id_end: 16527
+  #dynamic beam id range
+  dynamic_beam_id_start: 16528 #Dynamic beam ID start should be after static beam ID end
+  dynamic_beam_id_end: 32767 #15bit max value
+  bfw_c_plane_chaining_mode: 0 # 0: Default memcpy of BFW weights, 1: CPU mbuf chaining of BFW weights, 2: GPU mbuf chaining
+  enable_l1_param_sanity_check: 0
+  pusch_nMaxLdpcHetConfigs: 32
+  notify_ul_harq_buffer_release: 0
+
+  # data_config:
+    # data_core: 12               # This must be set for Data Lake and/or E3 Agent to be used
+    # datalake_db_write_enable: 1   # Enable/disable ClickHouse writes based on datalake_data_types
+    # datalake_samples: 1000000
+    # datalake_address: localhost
+    # datalake_engine: "MergeTree() PRIMARY KEY (TsTaiNs)"
+    # # datalake_drop_tables: 0   # Set to 1 to drop Clickhouse tables at startup
+    # datalake_data_types: [fh, pusch, hest, srs_iq, srs, srs_hest]  # Data types to write to ClickHouse DB (all types always collected in memory for E3 Agent):
+                                            # fh = Fronthaul IQ, pusch = PUSCH/FAPI, hest = PUSCH channel estimates,
+                                            # srs_iq = SRS IQ samples, srs = SRS scalars+RbSNR, srs_hest = SRS channel estimates
+    # datalake_store_failed_pdu: 0      # Set to 1 to store PDU data even when CRC fails
+    # e3_agent_enable: 1          # Enable/disable E3 Agent and dApp capabilities
+    # num_rows_fh: 120
+    # num_rows_pusch: 200
+    # num_rows_hest: 140
+    # num_rows_srs_iq: 40
+    # num_rows_srs: 70
+    # num_rows_srs_hest: 90
+    # e3_rep_port: 5555           # E3 reply port for E3AP requests (dApp REQ → Agent REP)
+    # e3_pub_port: 5556           # E3 publisher port for indication messages (Agent PUB → dApp SUB)
+    # e3_sub_port: 5557           # E3 subscriber port for dApp messages (dApp PUB → Agent SUB)
+
+  cells:
+    - name: O-RU 0
+      cell_id: 1
+      ru_type: 1
+      # set to 00:00:00:00:00:00 to use the MAC address of the NIC port to use
+      src_mac_addr: 00:00:00:00:00:00
+      dst_mac_addr: e8:c7:4f:25:80:eb
+      nic: '0000:01:00.0'
+      vlan: 564
+      pcp: 7
+      txq_count_uplane: 1
+      eAxC_id_ssb_pbch: [0, 1, 2, 3]
+      eAxC_id_pdcch: [0, 1, 2, 3]
+      eAxC_id_pdsch: [0, 1, 2, 3]
+      eAxC_id_csirs: [0, 1, 2, 3]
+      eAxC_id_pusch: [0, 1, 2, 3]
+      eAxC_id_pucch: [0, 1, 2, 3]
+      eAxC_id_srs: [0, 1, 2, 3]
+        #eAxC_id_srs: [8, 9, 10, 11]
+      eAxC_id_prach: [0, 1, 2, 3]
+        #eAxC_id_prach: [4, 5, 6, 7]
+      dl_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      ul_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      section_3_time_offset: 484
+      fs_offset_dl: 10
+      exponent_dl: 4
+      ref_dl: 0
+      fs_offset_ul: -3
+      exponent_ul: 4
+      max_amp_ul: 65504
+      mu: 1
+      T1a_max_cp_ul_ns: 392000
+      T1a_min_cp_ul_ns: 36000
+      T1a_max_cp_dl_ns: 464000
+      T1a_min_cp_dl_ns: 7600
+      T1a_max_up_ns: 339000
+      Ta4_min_ns: 84000
+      Ta4_max_ns: 280000
+      Tcp_adv_dl_ns: 125000
+      ul_u_plane_tx_offset_ns: 280000
+      fh_len_range: 0
+      pusch_prb_stride: 273
+      prach_prb_stride: 12
+      srs_prb_stride: 273
+      pusch_ldpc_max_num_itr_algo_type: 1
+      pusch_fixed_max_num_ldpc_itrs: 10
+      pusch_ldpc_early_termination: 0
+      pusch_ldpc_algo_index: 0
+      pusch_ldpc_flags: 2
+      pusch_ldpc_use_half: 1
+      pusch_nMaxPrb: 273
+      pusch_nMaxRx: 4
+        #ul_gain_calibration: 78.68
+      ul_gain_calibration: 99.58
+      lower_guard_bw: 845
+      tv_pusch: cuPhyChEstCoeffs.h5
+    - name: O-RU 1
+      cell_id: 2
+      ru_type: 1
+      # set to 00:00:00:00:00:00 to use the MAC address of the NIC port to use
+      src_mac_addr: 00:00:00:00:00:00
+      dst_mac_addr: 22:04:9B:9E:27:A2 # eCPRI cell #2
+      nic: '0000:01:00.0'
+      vlan: 2
+      pcp: 7
+      txq_count_uplane: 1
+      eAxC_id_ssb_pbch: [0, 1, 2, 3]
+      eAxC_id_pdcch: [0, 1, 2, 3]
+      eAxC_id_pdsch: [0, 1, 2, 3]
+      eAxC_id_csirs: [0, 1, 2, 3]
+      eAxC_id_pusch: [0, 1, 2, 3]
+      eAxC_id_pucch: [0, 1, 2, 3]
+      eAxC_id_srs: [8, 9, 10, 11]
+      eAxC_id_prach: [4, 5, 6, 7]
+      dl_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      ul_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      section_3_time_offset: 484
+      fs_offset_dl: 15
+      exponent_dl: 4
+      ref_dl: 0
+      fs_offset_ul: -5
+      exponent_ul: 4
+      max_amp_ul: 65504
+      mu: 1
+      T1a_max_up_ns: 280000
+      T1a_max_cp_ul_ns: 405000
+      Ta4_min_ns: 50000
+      Ta4_max_ns: 331000
+      Tcp_adv_dl_ns: 125000
+      ul_u_plane_tx_offset_ns: 280000
+      fh_len_range: 0
+      pusch_prb_stride: 273
+      prach_prb_stride: 12
+      srs_prb_stride: 273
+      pusch_ldpc_max_num_itr_algo_type: 1
+      pusch_fixed_max_num_ldpc_itrs: 10
+      pusch_ldpc_early_termination: 0
+      pusch_ldpc_algo_index: 0
+      pusch_ldpc_flags: 2
+      pusch_ldpc_use_half: 1
+      pusch_nMaxPrb: 273
+      pusch_nMaxRx: 4
+      ul_gain_calibration: 78.68
+      lower_guard_bw: 845
+      tv_pusch: cuPhyChEstCoeffs.h5
+    - name: O-RU 2
+      cell_id: 3
+      ru_type: 1
+      # set to 00:00:00:00:00:00 to use the MAC address of the NIC port to use
+      src_mac_addr: 00:00:00:00:00:00
+      dst_mac_addr: 22:04:9B:9E:27:A3 # eCPRI cell #3
+      nic: '0000:01:00.0'
+      vlan: 2
+      pcp: 7
+      txq_count_uplane: 1
+      eAxC_id_ssb_pbch: [0, 1, 2, 3]
+      eAxC_id_pdcch: [0, 1, 2, 3]
+      eAxC_id_pdsch: [0, 1, 2, 3]
+      eAxC_id_csirs: [0, 1, 2, 3]
+      eAxC_id_pusch: [0, 1, 2, 3]
+      eAxC_id_pucch: [0, 1, 2, 3]
+      eAxC_id_srs: [8, 9, 10, 11]
+      eAxC_id_prach: [4, 5, 6, 7]
+      dl_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      ul_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      section_3_time_offset: 484
+      fs_offset_dl: 15
+      exponent_dl: 4
+      ref_dl: 0
+      fs_offset_ul: -5
+      exponent_ul: 4
+      max_amp_ul: 65504
+      mu: 1
+      T1a_max_up_ns: 280000
+      T1a_max_cp_ul_ns: 405000
+      Ta4_min_ns: 50000
+      Ta4_max_ns: 331000
+      Tcp_adv_dl_ns: 125000
+      ul_u_plane_tx_offset_ns: 280000
+      fh_len_range: 0
+      pusch_prb_stride: 273
+      prach_prb_stride: 12
+      srs_prb_stride: 273
+      pusch_ldpc_max_num_itr_algo_type: 1
+      pusch_fixed_max_num_ldpc_itrs: 10
+      pusch_ldpc_early_termination: 0
+      pusch_ldpc_algo_index: 0
+      pusch_ldpc_flags: 2
+      pusch_ldpc_use_half: 1
+      pusch_nMaxPrb: 273
+      pusch_nMaxRx: 4
+      ul_gain_calibration: 78.68
+      lower_guard_bw: 845
+      tv_pusch: cuPhyChEstCoeffs.h5
+    - name: O-RU 3
+      cell_id: 4
+      ru_type: 1
+      # set to 00:00:00:00:00:00 to use the MAC address of the NIC port to use
+      src_mac_addr: 00:00:00:00:00:00
+      dst_mac_addr: 22:04:9B:9E:27:A4 # eCPRI cell #4
+      nic: '0000:01:00.0'
+      vlan: 2
+      pcp: 7
+      txq_count_uplane: 1
+      eAxC_id_ssb_pbch: [0, 1, 2, 3]
+      eAxC_id_pdcch: [0, 1, 2, 3]
+      eAxC_id_pdsch: [0, 1, 2, 3]
+      eAxC_id_csirs: [0, 1, 2, 3]
+      eAxC_id_pusch: [0, 1, 2, 3]
+      eAxC_id_pucch: [0, 1, 2, 3]
+      eAxC_id_srs: [8, 9, 10, 11]
+      eAxC_id_prach: [4, 5, 6, 7]
+      dl_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      ul_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      section_3_time_offset: 484
+      fs_offset_dl: 15
+      exponent_dl: 4
+      ref_dl: 0
+      fs_offset_ul: -5
+      exponent_ul: 4
+      max_amp_ul: 65504
+      mu: 1
+      T1a_max_up_ns: 280000
+      T1a_max_cp_ul_ns: 405000
+      Ta4_min_ns: 50000
+      Ta4_max_ns: 331000
+      Tcp_adv_dl_ns: 125000
+      ul_u_plane_tx_offset_ns: 280000
+      fh_len_range: 0
+      pusch_prb_stride: 273
+      prach_prb_stride: 12
+      srs_prb_stride: 273
+      pusch_ldpc_max_num_itr_algo_type: 1
+      pusch_fixed_max_num_ldpc_itrs: 10
+      pusch_ldpc_early_termination: 0
+      pusch_ldpc_algo_index: 0
+      pusch_ldpc_flags: 2
+      pusch_ldpc_use_half: 1
+      pusch_nMaxPrb: 273
+      pusch_nMaxRx: 4
+      ul_gain_calibration: 78.68
+      lower_guard_bw: 845
+      tv_pusch: cuPhyChEstCoeffs.h5
+    - name: O-RU 4
+      cell_id: 5
+      ru_type: 1
+      # set to 00:00:00:00:00:00 to use the MAC address of the NIC port to use
+      src_mac_addr: 00:00:00:00:00:00
+      dst_mac_addr: 22:04:9B:9E:27:A5 # eCPRI cell #5
+      nic: '0000:01:00.0'
+      vlan: 2
+      pcp: 7
+      txq_count_uplane: 1
+      eAxC_id_ssb_pbch: [0, 1, 2, 3]
+      eAxC_id_pdcch: [0, 1, 2, 3]
+      eAxC_id_pdsch: [0, 1, 2, 3]
+      eAxC_id_csirs: [0, 1, 2, 3]
+      eAxC_id_pusch: [0, 1, 2, 3]
+      eAxC_id_pucch: [0, 1, 2, 3]
+      eAxC_id_srs: [8, 9, 10, 11]
+      eAxC_id_prach: [4, 5, 6, 7]
+      dl_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      ul_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      section_3_time_offset: 484
+      fs_offset_dl: 15
+      exponent_dl: 4
+      ref_dl: 0
+      fs_offset_ul: -5
+      exponent_ul: 4
+      max_amp_ul: 65504
+      mu: 1
+      T1a_max_up_ns: 280000
+      T1a_max_cp_ul_ns: 405000
+      Ta4_min_ns: 50000
+      Ta4_max_ns: 331000
+      Tcp_adv_dl_ns: 125000
+      ul_u_plane_tx_offset_ns: 280000
+      fh_len_range: 0
+      pusch_prb_stride: 273
+      prach_prb_stride: 12
+      srs_prb_stride: 273
+      pusch_ldpc_max_num_itr_algo_type: 1
+      pusch_fixed_max_num_ldpc_itrs: 10
+      pusch_ldpc_early_termination: 0
+      pusch_ldpc_algo_index: 0
+      pusch_ldpc_flags: 2
+      pusch_ldpc_use_half: 1
+      pusch_nMaxPrb: 273
+      pusch_nMaxRx: 4
+      ul_gain_calibration: 78.68
+      lower_guard_bw: 845
+      tv_pusch: cuPhyChEstCoeffs.h5
+    - name: O-RU 5
+      cell_id: 6
+      ru_type: 1
+      # set to 00:00:00:00:00:00 to use the MAC address of the NIC port to use
+      src_mac_addr: 00:00:00:00:00:00
+      dst_mac_addr: 22:04:9B:9E:27:A6 # eCPRI cell #6
+      nic: '0000:01:00.0'
+      vlan: 2
+      pcp: 7
+      txq_count_uplane: 1
+      eAxC_id_ssb_pbch: [0, 1, 2, 3]
+      eAxC_id_pdcch: [0, 1, 2, 3]
+      eAxC_id_pdsch: [0, 1, 2, 3]
+      eAxC_id_csirs: [0, 1, 2, 3]
+      eAxC_id_pusch: [0, 1, 2, 3]
+      eAxC_id_pucch: [0, 1, 2, 3]
+      eAxC_id_srs: [8, 9, 10, 11]
+      eAxC_id_prach: [4, 5, 6, 7]
+      dl_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      ul_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      section_3_time_offset: 484
+      fs_offset_dl: 15
+      exponent_dl: 4
+      ref_dl: 0
+      fs_offset_ul: -5
+      exponent_ul: 4
+      max_amp_ul: 65504
+      mu: 1
+      T1a_max_up_ns: 280000
+      T1a_max_cp_ul_ns: 405000
+      Ta4_min_ns: 50000
+      Ta4_max_ns: 331000
+      Tcp_adv_dl_ns: 125000
+      ul_u_plane_tx_offset_ns: 280000
+      fh_len_range: 0
+      pusch_prb_stride: 273
+      prach_prb_stride: 12
+      srs_prb_stride: 273
+      pusch_ldpc_max_num_itr_algo_type: 1
+      pusch_fixed_max_num_ldpc_itrs: 10
+      pusch_ldpc_early_termination: 0
+      pusch_ldpc_algo_index: 0
+      pusch_ldpc_flags: 2
+      pusch_ldpc_use_half: 1
+      pusch_nMaxPrb: 273
+      pusch_nMaxRx: 4
+      ul_gain_calibration: 78.68
+      lower_guard_bw: 845
+      tv_pusch: cuPhyChEstCoeffs.h5
+    - name: O-RU 6
+      cell_id: 7
+      ru_type: 1
+      # set to 00:00:00:00:00:00 to use the MAC address of the NIC port to use
+      src_mac_addr: 00:00:00:00:00:00
+      dst_mac_addr: 22:04:9B:9E:27:A7 # eCPRI cell #7
+      nic: '0000:01:00.0'
+      vlan: 2
+      pcp: 7
+      txq_count_uplane: 1
+      eAxC_id_ssb_pbch: [0, 1, 2, 3]
+      eAxC_id_pdcch: [0, 1, 2, 3]
+      eAxC_id_pdsch: [0, 1, 2, 3]
+      eAxC_id_csirs: [0, 1, 2, 3]
+      eAxC_id_pusch: [0, 1, 2, 3]
+      eAxC_id_pucch: [0, 1, 2, 3]
+      eAxC_id_srs: [8, 9, 10, 11]
+      eAxC_id_prach: [4, 5, 6, 7]
+      dl_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      ul_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      section_3_time_offset: 484
+      fs_offset_dl: 15
+      exponent_dl: 4
+      ref_dl: 0
+      fs_offset_ul: -5
+      exponent_ul: 4
+      max_amp_ul: 65504
+      mu: 1
+      T1a_max_up_ns: 280000
+      T1a_max_cp_ul_ns: 405000
+      Ta4_min_ns: 50000
+      Ta4_max_ns: 331000
+      Tcp_adv_dl_ns: 125000
+      ul_u_plane_tx_offset_ns: 280000
+      fh_len_range: 0
+      pusch_prb_stride: 273
+      prach_prb_stride: 12
+      srs_prb_stride: 273
+      pusch_ldpc_max_num_itr_algo_type: 1
+      pusch_fixed_max_num_ldpc_itrs: 10
+      pusch_ldpc_early_termination: 0
+      pusch_ldpc_algo_index: 0
+      pusch_ldpc_flags: 2
+      pusch_ldpc_use_half: 1
+      pusch_nMaxPrb: 273
+      pusch_nMaxRx: 4
+      ul_gain_calibration: 78.68
+      lower_guard_bw: 845
+      tv_pusch: cuPhyChEstCoeffs.h5
+    - name: O-RU 7
+      cell_id: 8
+      ru_type: 1
+      # set to 00:00:00:00:00:00 to use the MAC address of the NIC port to use
+      src_mac_addr: 00:00:00:00:00:00
+      dst_mac_addr: 22:04:9B:9E:27:A8 # eCPRI cell #8
+      nic: '0000:01:00.0'
+      vlan: 2
+      pcp: 7
+      txq_count_uplane: 1
+      eAxC_id_ssb_pbch: [0, 1, 2, 3]
+      eAxC_id_pdcch: [0, 1, 2, 3]
+      eAxC_id_pdsch: [0, 1, 2, 3]
+      eAxC_id_csirs: [0, 1, 2, 3]
+      eAxC_id_pusch: [0, 1, 2, 3]
+      eAxC_id_pucch: [0, 1, 2, 3]
+      eAxC_id_srs: [8, 9, 10, 11]
+      eAxC_id_prach: [4, 5, 6, 7]
+      dl_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      ul_iq_data_fmt: {comp_meth: 1, bit_width: 9}
+      section_3_time_offset: 484
+      fs_offset_dl: 15
+      exponent_dl: 4
+      ref_dl: 0
+      fs_offset_ul: -5
+      exponent_ul: 4
+      max_amp_ul: 65504
+      mu: 1
+      T1a_max_up_ns: 280000
+      T1a_max_cp_ul_ns: 405000
+      Ta4_min_ns: 50000
+      Ta4_max_ns: 331000
+      Tcp_adv_dl_ns: 125000
+      ul_u_plane_tx_offset_ns: 280000
+      fh_len_range: 0
+      pusch_prb_stride: 273
+      prach_prb_stride: 12
+      srs_prb_stride: 273
+      pusch_ldpc_max_num_itr_algo_type: 1
+      pusch_fixed_max_num_ldpc_itrs: 10
+      pusch_ldpc_early_termination: 0
+      pusch_ldpc_algo_index: 0
+      pusch_ldpc_flags: 2
+      pusch_ldpc_use_half: 1
+      pusch_nMaxPrb: 273
+      pusch_nMaxRx: 4
+      ul_gain_calibration: 78.68
+      lower_guard_bw: 845
+      tv_pusch: cuPhyChEstCoeffs.h5

@@ -608,7 +608,8 @@ private:
 
     std::shared_ptr<DataLake> dataLake;
     int16_t data_core;
-    std::thread datalake_thread;
+    std::thread datalake_pusch_thread;
+    std::thread datalake_srs_thread;
 
     // Section Id per UL channel. ORAN SectionId 12bits
     uint16_t start_section_id_srs;

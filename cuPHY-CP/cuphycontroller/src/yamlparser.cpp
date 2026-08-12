@@ -1715,6 +1715,24 @@ int YamlParser::parse_cuphydriver_configs(yaml::node root)
                 phydriver_config.num_rows_hest = 140;
             }
             
+            if(data_cfg.has_key("num_rows_srs_iq")) {
+                phydriver_config.num_rows_srs_iq = data_cfg["num_rows_srs_iq"].as<uint32_t>();
+            } else {
+                phydriver_config.num_rows_srs_iq = 40;
+            }
+            
+            if(data_cfg.has_key("num_rows_srs")) {
+                phydriver_config.num_rows_srs = data_cfg["num_rows_srs"].as<uint32_t>();
+            } else {
+                phydriver_config.num_rows_srs = 70;
+            }
+            
+            if(data_cfg.has_key("num_rows_srs_hest")) {
+                phydriver_config.num_rows_srs_hest = data_cfg["num_rows_srs_hest"].as<uint32_t>();
+            } else {
+                phydriver_config.num_rows_srs_hest = 90;
+            }
+            
             // E3 Agent enable flag (runtime configurable)
             if(data_cfg.has_key("e3_agent_enable")) {
                 phydriver_config.e3_agent_enabled = data_cfg["e3_agent_enable"].as<uint8_t>() != 0;
@@ -1755,7 +1773,7 @@ int YamlParser::parse_cuphydriver_configs(yaml::node root)
                 }
             } else {
                 // Default: enable all data types
-                phydriver_config.datalake_data_types = {"fh", "pusch", "hest"};
+                phydriver_config.datalake_data_types = {"fh", "pusch", "hest", "srs_iq", "srs", "srs_hest"};
             }
         } else {
             NVLOGI_FMT(TAG," Using default values for data_config");
@@ -1764,11 +1782,14 @@ int YamlParser::parse_cuphydriver_configs(yaml::node root)
             phydriver_config.datalake_samples = 1000000;
             phydriver_config.datalake_address = "localhost";
             phydriver_config.datalake_engine = "Memory";
-            phydriver_config.datalake_data_types = {"fh", "pusch", "hest"};
+            phydriver_config.datalake_data_types = {"fh", "pusch", "hest", "srs_iq", "srs", "srs_hest"};
             phydriver_config.datalake_store_failed_pdu = 0;
             phydriver_config.num_rows_fh = 120;
             phydriver_config.num_rows_pusch = 400;
             phydriver_config.num_rows_hest = 140;
+            phydriver_config.num_rows_srs_iq = 40;
+            phydriver_config.num_rows_srs = 70;
+            phydriver_config.num_rows_srs_hest = 90;
             phydriver_config.datalake_drop_tables = 0;
             phydriver_config.e3_agent_enabled = false;
             phydriver_config.e3_rep_port = 5555;
@@ -2206,6 +2227,18 @@ uint32_t YamlParser::get_cuphydriver_num_rows_pusch() {
 
 uint32_t YamlParser::get_cuphydriver_num_rows_hest() {
     return phydriver_config.num_rows_hest;
+}
+
+uint32_t YamlParser::get_cuphydriver_num_rows_srs_iq() {
+    return phydriver_config.num_rows_srs_iq;
+}
+
+uint32_t YamlParser::get_cuphydriver_num_rows_srs() {
+    return phydriver_config.num_rows_srs;
+}
+
+uint32_t YamlParser::get_cuphydriver_num_rows_srs_hest() {
+    return phydriver_config.num_rows_srs_hest;
 }
 
 uint8_t YamlParser::get_cuphydriver_e3_agent_enabled() {

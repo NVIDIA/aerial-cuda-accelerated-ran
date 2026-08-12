@@ -564,14 +564,13 @@ typedef struct _cuphyPuschDataOut
     uint8_t* pPreEarlyHarqWaitKernelStatusGpu;  /// Pointer to device memory which holds the status of preEarlyHarqWaitKernel
     uint8_t* pPostEarlyHarqWaitKernelStatusGpu; /// Pointer to device memory which holds the status of postEarlyHarqWaitKernel
 
-    float2* pChannelEsts; /*< Channel Estimates: Pointer to H matrix estimates. Complex channel response
-                              packed consecutively for first UE group only (like IQ samples).
-                              Physical memory layout: (nDmrsEstimates, nSubcarriers, nRxAnt, nLayers) in row-major order.
+    float2* pChannelEsts; /*< Channel Estimates: Pointer to H matrix estimates, all UE groups concatenated.
+                              Physical memory layout per group: (nDmrsEstimates, nSubcarriers, nRxAnt, nLayers) in row-major order.
                               Note: PyAerial transposes this to (nRxAnt, nLayers, nSubcarriers, nDmrsEstimates) for user convenience.
-                              Use pChannelEstSizes to determine data size in elements */
+                              Use pChannelEstSizes to determine per-group data size in elements */
 
-    uint32_t* pChannelEstSizes; /*< Channel Estimate Sizes: Pointer to array containing size of 
-                                     first UE group's channel estimate data in elements (complex float pairs) */
+    uint32_t* pChannelEstSizes; /*< Channel Estimate Sizes: Array of nUeGrps elements, each containing the
+                                     corresponding UE group's channel estimate data size in elements (float2) */
 
 } cuphyPuschDataOut_t;
 
@@ -1325,6 +1324,8 @@ typedef struct _cuphySrsDataIn
 
 typedef struct _cuphySrsDataOut
 {
+    __half2*   pDataRxSrs;         // host-pinned buffer for raw SRS IQ from buf_st_2 (GPU->host copy, gated on DataLake)
+
     cuphySrsChEstBuffInfo_t* pChEstBuffInfo;  // array of ChEst buffers of all users
     cuphySrsReport_t*        pSrsReports;     // array containing SRS reports of all users
     cuphySrsChEstToL2_t*     pSrsChEstToL2;   // array of CPU ChEst to L2 of all users

@@ -4981,6 +4981,7 @@ srsDynApiDataset::srsDynApiDataset(const std::vector<std::string>& inputFileName
     dataOut.pRbSnrBuffer       = rbSnrVec.addr();
     dataOut.pRbSnrBuffOffsets  = rbSnrBuffOffsetVec.data();
     dataOut.pSrsChEstToL2      = chEstToL2Vec.data();
+    dataOut.pDataRxSrs         = nullptr;
 
     // debug parameters:
     dynDbgPrm.enableApiLogging = 0;

@@ -83,10 +83,11 @@ case "$PLATFORM" in
         LINUXPTP_VERSION="4.2"           # available via apt on Ubuntu 24.04
 
         NIC_DEV="/dev/mst/mt4129_pciconf0"
+        NIC_FW_VERSION="28.47.1088"       # Used for post-reboot verification after mlnx-fw-updater
         ISOLCPUS="4-19"
 
-        # PTP services: pin to CPU 4 (override with PTP_CPU_AFFINITY=<cpu number> if needed). Empty = unpinned.
-        PTP_CPU_AFFINITY="${PTP_CPU_AFFINITY:-4}"
+        # PTP services are unpinned by default. Set PTP_CPU_AFFINITY to pin them explicitly.
+        PTP_CPU_AFFINITY="${PTP_CPU_AFFINITY:-}"
 
         # build_aerial_sdk.sh args
         AERIAL_BUILD_FLAGS="${AERIAL_BUILD_FLAGS:- --cuda-archs 121}"
@@ -112,13 +113,16 @@ case "$PLATFORM" in
         CUDA_RUN_FILE_NAME="cuda_${CUDA_VERSION}_${GPU_DRIVER_VERSION}_linux_sbsa.run"
 
         # GDRCopy (GPU Direct RDMA)
-        GDRDRV_VERSION="2.5.1-1"
-        GDRDRV_CUDA_VERSION="13.0"
+        GDRDRV_VERSION="2.5-1"
+        GDRDRV_CUDA_VERSION="12.8"
         GDRCOPY_UBUNTU_VER="ubuntu22_04"
 
         HUGEPAGES="48"                       # 48 × 512M = 24GB (GH200)
         LINUXPTP_VERSION="4.2"           # must build from source on Ubuntu 22.04
         BFB_VERSION="3.2.1-34_25.11-prod"   # BlueField3 BFB bundle version
+        NIC_FW_VERSION="32.47.1088"       # Used for post-BFB-install verification on both BF3 devices
+        BFB_RSHIM_NUMS="0 1"
+        NIC_FW_DEVICES="/dev/mst/mt41692_pciconf0 /dev/mst/mt41692_pciconf1"
 
         NIC_DEV="/dev/mst/mt41692_pciconf0"
         ISOLCPUS="4-64"
@@ -215,6 +219,7 @@ show_versions() {
     echo "  GPU Driver:   $GPU_DRIVER_VERSION"
     echo "  GDRCopy:      $GDRDRV_VERSION (CUDA $GDRDRV_CUDA_VERSION)"
     echo "  linuxptp:     $LINUXPTP_VERSION"
+    echo "  NIC FW:       ${NIC_FW_VERSION:-not set}"
     echo "  Aerial build: ${AERIAL_BUILD_FLAGS:-<none>}"
     echo ""
     echo "Aerial Container:"

@@ -144,17 +144,17 @@ $(STAMP_DRIVERS): $(SCRIPT_DIR)install_drivers.sh $(SCRIPT_DIR)versions.sh $(STA
 	$(SCRIPT_DIR)/install_drivers.sh $(OPTS)
 	@touch $@
 
-# nic_fw: installs BlueField3 BFB firmware (Supermicro GH200 only; no-op on other platforms)
-# Depends on drivers since bfb-install requires DOCA/OFED to be present
+# nic_fw: verifies and configures NIC firmware; installs the BlueField3 BFB on GH200 when the firmware version differs from the expected version
+# Depends on drivers since flint, mlxconfig, and bfb-install require DOCA/OFED to be present
 nic_fw: $(STAMP_NIC_FW)
 $(STAMP_NIC_FW): $(SCRIPT_DIR)install_nic_fw.sh $(SCRIPT_DIR)versions.sh $(STAMP_DRIVERS) | $(STAMP_DIR)
 	@echo "========================================"
-	@echo "Installing NIC firmware (BlueField3 BFB)"
+	@echo "Verifying and configuring NIC firmware"
 	@echo "========================================"
 	$(SCRIPT_DIR)/install_nic_fw.sh $(OPTS)
 	@touch $@
 
-# services: runs after both net (needs aerial0x) and nic_fw (needs BF3 FW)
+# services: runs after both net (needs aerial0x) and nic_fw (needs NIC firmware/configuration)
 services: $(STAMP_SERVICES)
 $(STAMP_SERVICES): $(SCRIPT_DIR)install_services.sh $(SCRIPT_DIR)versions.sh $(STAMP_NET) $(STAMP_NIC_FW) | $(STAMP_DIR)
 	@echo "========================================"
@@ -228,7 +228,7 @@ help:
 	@echo "  kernel    - Install Aerial CUDA kernel"
 	@echo "  drivers   - Install DOCA, OFED, and GPU drivers"
 	@echo "  net       - Setup aerial0x network interfaces (requires OFED)"
-	@echo "  nic_fw    - Install BlueField3 BFB NIC firmware (Supermicro GH200 only)"
+	@echo "  nic_fw    - Verify/configure NIC firmware; install the GH200 BFB on firmware version mismatch"
 	@echo "  services  - Install PTP and system services"
 	@echo "  check     - Check installation status"
 	@echo "  build     - Build Aerial SDK and OAI"

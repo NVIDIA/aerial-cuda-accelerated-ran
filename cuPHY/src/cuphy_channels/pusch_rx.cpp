@@ -4873,22 +4873,26 @@ cuphyStatus_t PuschRx::copyOutputToCPU(cudaStream_t cuStrm)
         m_batchedMemcpyHelper[batched_copy_config].updateMemcpy(m_outputPrms.pCsiP2DetectionStatusHost, m_outputPrms.pCsiP2DetectionStatusDevice, m_nUes, cudaMemcpyDeviceToHost, cuStrm);
     }
 
-    // Copy H matrix estimates - Currently only handling first UE group
+    // Copy H matrix estimates for all UE groups, concatenated into pChannelEstsHost.
     if(m_outputPrms.pChannelEstsHost)
     {
-        const auto& tensor = m_tRefHEstVec[0];  // First UE group only
-        const size_t tensorSizeInBytes = tensor.desc().get_size_in_bytes();
+        size_t offsetBytes = 0;
+        for(uint32_t g = 0; g < m_cuphyPuschCellGrpDynPrm.nUeGrps; g++)
+        {
+            auto& tensor = m_tRefHEstVec[g];
+            const size_t tensorSizeInBytes = tensor.desc().get_size_in_bytes();
 
-        // Copy H matrix for first UE group
-        m_batchedMemcpyHelper[batched_copy_config].updateMemcpy(
-            m_outputPrms.pChannelEstsHost,
-            const_cast<void*>(tensor.addr()),
-            tensorSizeInBytes,
-            cudaMemcpyDeviceToHost,
-            cuStrm);
-
-        // Store the size in elements (float2 complex pairs)
-        m_outputPrms.pChannelEstSizesHost[0] = tensorSizeInBytes / sizeof(float2);
+            m_batchedMemcpyHelper[batched_copy_config].updateMemcpy(
+                reinterpret_cast<uint8_t*>(m_outputPrms.pChannelEstsHost) + offsetBytes,
+                tensor.addr(),
+                tensorSizeInBytes,
+                cudaMemcpyDeviceToHost,
+                cuStrm);
+            
+            // Store the size in elements (float2 complex pairs)
+            m_outputPrms.pChannelEstSizesHost[g] = tensorSizeInBytes / sizeof(float2);
+            offsetBytes += tensorSizeInBytes;
+        }
     }
 
     cuphyStatus_t status = m_batchedMemcpyHelper[batched_copy_config].launchBatchedMemcpy(cuStrm);

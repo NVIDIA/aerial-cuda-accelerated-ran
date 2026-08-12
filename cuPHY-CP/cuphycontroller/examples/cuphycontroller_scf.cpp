@@ -301,6 +301,9 @@ int main(int argc,char* argv[]) {
     ctx_cfg.num_rows_fh = parser_cfg.get_cuphydriver_num_rows_fh();
     ctx_cfg.num_rows_pusch = parser_cfg.get_cuphydriver_num_rows_pusch();
     ctx_cfg.num_rows_hest = parser_cfg.get_cuphydriver_num_rows_hest();
+    ctx_cfg.num_rows_srs_iq = parser_cfg.get_cuphydriver_num_rows_srs_iq();
+    ctx_cfg.num_rows_srs = parser_cfg.get_cuphydriver_num_rows_srs();
+    ctx_cfg.num_rows_srs_hest = parser_cfg.get_cuphydriver_num_rows_srs_hest();
     ctx_cfg.e3_agent_enabled = parser_cfg.get_cuphydriver_e3_agent_enabled();
     ctx_cfg.e3_rep_port = parser_cfg.get_cuphydriver_e3_rep_port();
     ctx_cfg.e3_pub_port = parser_cfg.get_cuphydriver_e3_pub_port();
