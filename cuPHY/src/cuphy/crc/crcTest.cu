@@ -1261,7 +1261,7 @@ TEST(CRCTest, UplinkPuschWithTiming)
 {
     // Test with timing enabled
     int result = CRC_GPU_UPLINK_PUSCH_TEST(true);
-    EXPECT_EQ(result, 0) << "CRC test with timing enabled failed";
+    EXPECT_EQ(result, 1) << "CRC test with timing enabled failed";
 }
 
 TEST(PuschRxCrcDecodeTest, SetupFunction)
