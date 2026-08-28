@@ -25,6 +25,8 @@
 #include <time.h>
 #include <stdio.h>
 #include <net/if.h>
+#include <cstdlib>
+#include <cstring>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -606,7 +608,21 @@ void Nic::check_physical_link_status() const
 
     if(link.link_status == RTE_ETH_LINK_DOWN)
     {
-        NVLOGF_FMT(TAG, AERIAL_DPDK_API_EVENT, "NIC {} has no physical Ethernet link (cable unplugged or peer port down)", info_.name);
+        // A missing physical link is fatal by default. Cable-less bring-up
+        // (development workstations, CI without a wired RU, pre-RU lab setups)
+        // can set AERIAL_FH_LINK_REQUIRED=0 to downgrade this to an error and
+        // let initialization continue. The comparison is an exact string match
+        // rather than an integer parse, so that anything unrecognized -- an
+        // empty value, "false", a typo -- leaves the fatal default in place.
+        const char* link_required_env = std::getenv("AERIAL_FH_LINK_REQUIRED");
+        if((link_required_env != nullptr) && (std::strcmp(link_required_env, "0") == 0))
+        {
+            NVLOGE_FMT(TAG, AERIAL_DPDK_API_EVENT, "NIC {} has no physical Ethernet link (cable unplugged or peer port down); continuing because AERIAL_FH_LINK_REQUIRED=0", info_.name);
+        }
+        else
+        {
+            NVLOGF_FMT(TAG, AERIAL_DPDK_API_EVENT, "NIC {} has no physical Ethernet link (cable unplugged or peer port down)", info_.name);
+        }
     }
 
     NVLOGI_FMT(TAG, "NIC {} link status: {}, {}, {}",
