@@ -90,6 +90,19 @@ struct box_plus_op
         //       __low2float(out.f16x2));
         return out;
     }
+
+    // Overwrite-and-return variant used to reduce temporary register pressure.
+    static __device__ word_t box_plus_consume(word_t a, word_t b)
+    {
+#if __CUDA_ARCH__ >= 860
+        asm volatile("min.xorsign.abs.f16x2 %0, %0, %1;\n"
+                     : "+r"(a.u32)
+                     : "r"(b.u32));
+        return a;
+#else
+        return box_plus(a, b);
+#endif
+    }
 };
 
 template <typename T, class TBoxPlusOp, int ROW_DEGREE, int UPDATE_ROW_DEGREE> struct box_plus_seq_gen;
@@ -171,8 +184,8 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 4, 3>
         const word_t& VAL_3_2 = app[1];
         word_t BP_13_02       = op_t::box_plus(VAL_3_2,  VAL_1_0);
         word_t BP_02_13       = swap_high_low(BP_13_02);
-        word_t BP_023_123     = op_t::box_plus(BP_02_13, VAL_3_2);
         word_t BP_012_013     = op_t::box_plus(BP_02_13, VAL_1_0);
+        word_t BP_023_123     = op_t::box_plus_consume(BP_02_13, VAL_3_2);
         seq[0] = BP_023_123;
         seq[1].f16x2.x = BP_012_013.f16x2.x;
         seq[1].f16x2.y = 0;
@@ -204,8 +217,8 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 4, 4>
         const word_t& VAL_3_2 = app[1];
         word_t BP_13_02       = op_t::box_plus(VAL_3_2,  VAL_1_0);
         word_t BP_02_13       = swap_high_low(BP_13_02);
-        word_t BP_023_123     = op_t::box_plus(BP_02_13, VAL_3_2);
         word_t BP_012_013     = op_t::box_plus(BP_02_13, VAL_1_0);
+        word_t BP_023_123     = op_t::box_plus_consume(BP_02_13, VAL_3_2);
         seq[0] = BP_023_123;
         seq[1] = BP_012_013;
         //printf("box_plus_seq_gen<4, 4>: inputs = (%.0f %.0f)  (%.0f %.0f), outputs = (%.0f %.0f) (%.0f %.0f)\n",
@@ -239,8 +252,8 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 5, 4>
         word_t BP_13_02       = op_t::box_plus(VAL_3_2,    VAL_1_0);
         word_t BP_02_13       = swap_high_low(BP_13_02);
         word_t BP_024_134     = op_t::box_plus(BP_02_13,   VAL_4_4);
-        word_t BP_0234_1234   = op_t::box_plus(BP_024_134, VAL_3_2);
         word_t BP_0124_0134   = op_t::box_plus(BP_024_134, VAL_1_0);
+        word_t BP_0234_1234   = op_t::box_plus_consume(BP_024_134, VAL_3_2);
         seq[0] = BP_0234_1234;
         seq[1] = BP_0124_0134;
         //printf("box_plus_seq_gen<5, 4>: inputs = (    %.0f) (%.0f %.0f) (%.0f %.0f), outputs = (%.0f %.0f) (%.0f %.0f)\n",
@@ -275,8 +288,8 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 5, 5>
         word_t BP_13_02       = op_t::box_plus(VAL_3_2,    VAL_1_0);
         word_t BP_02_13       = swap_high_low(BP_13_02);
         word_t BP_024_134     = op_t::box_plus(BP_02_13,   VAL_4_4);
-        word_t BP_0234_1234   = op_t::box_plus(BP_024_134, VAL_3_2);
         word_t BP_0124_0134   = op_t::box_plus(BP_024_134, VAL_1_0);
+        word_t BP_0234_1234   = op_t::box_plus_consume(BP_024_134, VAL_3_2);
         word_t BP_0123_0123   = op_t::box_plus(BP_13_02,   BP_02_13);
         seq[0] = BP_0234_1234;
         seq[1] = BP_0124_0134;
@@ -318,8 +331,8 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 6, 5>
         word_t BP_024_135     = swap_high_low(BP_135_024);
         word_t BP_01234_01235 = op_t::box_plus(BP_024_135,   BP_13_02);
         word_t BP_0245_1345   = op_t::box_plus(BP_024_135,   VAL_5_4);
-        word_t BP_02345_12345 = op_t::box_plus(BP_0245_1345, VAL_3_2);
         word_t BP_01245_01345 = op_t::box_plus(BP_0245_1345, VAL_1_0);
+        word_t BP_02345_12345 = op_t::box_plus_consume(BP_0245_1345, VAL_3_2);
         seq[0] = BP_02345_12345;
         seq[1] = BP_01245_01345;
         seq[2].f16x2.x = BP_01234_01235.f16x2.x;
@@ -361,8 +374,8 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 6, 6>
         word_t BP_024_135     = swap_high_low(BP_135_024);
         word_t BP_01234_01235 = op_t::box_plus(BP_024_135,   BP_13_02);
         word_t BP_0245_1345   = op_t::box_plus(BP_024_135,   VAL_5_4);
-        word_t BP_02345_12345 = op_t::box_plus(BP_0245_1345, VAL_3_2);
         word_t BP_01245_01345 = op_t::box_plus(BP_0245_1345, VAL_1_0);
+        word_t BP_02345_12345 = op_t::box_plus_consume(BP_0245_1345, VAL_3_2);
         seq[0] = BP_02345_12345;
         seq[1] = BP_01245_01345;
         seq[2] = BP_01234_01235;
@@ -409,7 +422,7 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 7, 6>
         word_t BP_012346_012356 = op_t::box_plus(BP_0246_1356, BP_13_02);
         word_t BP_02456_13456   = op_t::box_plus(BP_0246_1356, VAL_5_4);
         word_t BP_012456_013456 = op_t::box_plus(BP_02456_13456, VAL_1_0);
-        word_t BP_023456_123456 = op_t::box_plus(BP_02456_13456, VAL_3_2);
+        word_t BP_023456_123456 = op_t::box_plus_consume(BP_02456_13456, VAL_3_2);
         seq[0] = BP_023456_123456;
         seq[1] = BP_012456_013456;
         seq[2] = BP_012346_012356;
@@ -460,7 +473,7 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 7, 7>
         word_t BP_012346_012356 = op_t::box_plus(BP_0246_1356, BP_13_02);
         word_t BP_02456_13456   = op_t::box_plus(BP_0246_1356, VAL_5_4);
         word_t BP_012456_013456 = op_t::box_plus(BP_02456_13456, VAL_1_0);
-        word_t BP_023456_123456 = op_t::box_plus(BP_02456_13456, VAL_3_2);
+        word_t BP_023456_123456 = op_t::box_plus_consume(BP_02456_13456, VAL_3_2);
         seq[0] = BP_023456_123456;
         seq[1] = BP_012456_013456;
         seq[2] = BP_012346_012356;
@@ -511,9 +524,9 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 8, 7>
         word_t BP_012346_012357   = op_t::box_plus(BP_0246_1357, BP_13_02);
         word_t BP_024567_134567   = op_t::box_plus(BP_0246_1357, BP_57_46);
         word_t BP_0123467_0123567 = op_t::box_plus(BP_012346_012357, VAL_7_6);
-        word_t BP_0234567_1234567 = op_t::box_plus(BP_024567_134567, VAL_3_2);
         word_t BP_0123456_0123457 = op_t::box_plus(BP_012346_012357, VAL_5_4);
         word_t BP_0124567_0134567 = op_t::box_plus(BP_024567_134567, VAL_1_0);
+        word_t BP_0234567_1234567 = op_t::box_plus_consume(BP_024567_134567, VAL_3_2);
         seq[0] = BP_0234567_1234567;
         seq[1] = BP_0124567_0134567;
         seq[2] = BP_0123467_0123567;
@@ -565,9 +578,9 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 8, 8>
         word_t BP_012346_012357   = op_t::box_plus(BP_0246_1357, BP_13_02);
         word_t BP_024567_134567   = op_t::box_plus(BP_0246_1357, BP_57_46);
         word_t BP_0123467_0123567 = op_t::box_plus(BP_012346_012357, VAL_7_6);
-        word_t BP_0234567_1234567 = op_t::box_plus(BP_024567_134567, VAL_3_2);
         word_t BP_0123456_0123457 = op_t::box_plus(BP_012346_012357, VAL_5_4);
         word_t BP_0124567_0134567 = op_t::box_plus(BP_024567_134567, VAL_1_0);
+        word_t BP_0234567_1234567 = op_t::box_plus_consume(BP_024567_134567, VAL_3_2);
         seq[0] = BP_0234567_1234567;
         seq[1] = BP_0124567_0134567;
         seq[2] = BP_0123467_0123567;
@@ -623,8 +636,8 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 9, 8>
         word_t BP_0245678_1345678   = op_t::box_plus(BP_02468_13578,     BP_57_46);
         word_t BP_01234678_01235678 = op_t::box_plus(BP_0123468_0123578, VAL_7_6);
         word_t BP_01234568_01234578 = op_t::box_plus(BP_0123468_0123578, VAL_5_4);
-        word_t BP_02345678_12345678 = op_t::box_plus(BP_0245678_1345678, VAL_3_2);
         word_t BP_01245678_01345678 = op_t::box_plus(BP_0245678_1345678, VAL_1_0);
+        word_t BP_02345678_12345678 = op_t::box_plus_consume(BP_0245678_1345678, VAL_3_2);
         seq[0] = BP_02345678_12345678;
         seq[1] = BP_01245678_01345678;
         seq[2] = BP_01234678_01235678;
@@ -685,8 +698,8 @@ template <class TBoxPlusOp> struct box_plus_seq_gen<__half, TBoxPlusOp, 9, 9>
         word_t BP_0245678_1345678   = op_t::box_plus(BP_02468_13578,     BP_57_46);
         word_t BP_01234678_01235678 = op_t::box_plus(BP_0123468_0123578, VAL_7_6);
         word_t BP_01234568_01234578 = op_t::box_plus(BP_0123468_0123578, VAL_5_4);
-        word_t BP_02345678_12345678 = op_t::box_plus(BP_0245678_1345678, VAL_3_2);
         word_t BP_01245678_01345678 = op_t::box_plus(BP_0245678_1345678, VAL_1_0);
+        word_t BP_02345678_12345678 = op_t::box_plus_consume(BP_0245678_1345678, VAL_3_2);
         seq[0] = BP_02345678_12345678;
         seq[1] = BP_01245678_01345678;
         seq[2] = BP_01234678_01235678;

@@ -160,6 +160,8 @@ struct app_loc_address_fp_dp_desc
     //------------------------------------------------------------------
     // Base graph descriptor type used by this app address calculator
     typedef BG_adj_desc<BG> bg_desc_t;
+    // Z=384 packed as raw fp16x2 denormalized integer payload.
+    static constexpr uint32_t Z384_RAW_FP16X2 = (384u << 16) | 384u;
     //------------------------------------------------------------------
     // app_loc_address_fp_dp_desc()
     // Constructor using original LDPC_kernel_params struct
@@ -169,7 +171,7 @@ struct app_loc_address_fp_dp_desc
                                unsigned int              t_idx) : bg_desc(bgd),
                                                                   Z_Z(h0_h0(params.Z)),
                                                                   tIdx_tIdx(h0_h0(t_idx)),
-                                                                  tIdx_Z(h0_h0(t_idx + params.Z))
+                                                                  tIdx_Z(get_tIdx_plus_Z(tIdx_tIdx, params.Z))
     {
     }
     //------------------------------------------------------------------
@@ -181,8 +183,21 @@ struct app_loc_address_fp_dp_desc
                                unsigned int                       t_idx) : bg_desc(bgd),
                                                                            Z_Z(h0_h0(config.Z)),
                                                                            tIdx_tIdx(h0_h0(t_idx)),
-                                                                           tIdx_Z(h0_h0(t_idx + config.Z))
+                                                                           tIdx_Z(get_tIdx_plus_Z(tIdx_tIdx, config.Z))
     {
+    }
+    //------------------------------------------------------------------
+    // get_tIdx_plus_Z()
+    __device__ static
+    word_t get_tIdx_plus_Z(word_t tIdx_tIdx_in, unsigned int Z)
+    {
+        if(Z == 384u)
+        {
+            word_t tIdx_Z_out;
+            tIdx_Z_out.u32 = tIdx_tIdx_in.u32 + Z384_RAW_FP16X2;
+            return tIdx_Z_out;
+        }
+        return h0_h0(static_cast<unsigned int>(tIdx_tIdx_in.u16x2.x) + Z);
     }
     //------------------------------------------------------------------
     // generate()
@@ -199,8 +214,8 @@ struct app_loc_address_fp_dp_desc
             // COL_IDX_SHIFT_LOW  = ((col_idx[0] - 1) * Z + shift) * sizeof(T)   (signed, stored as full int32) (Subtracting "extra" Z)
             // COL_IDX_SHIFT_HIGH = ((col_idx[1] - 1) * Z + shift) * sizeof(T)   (signed, stored as full int32) (Subtracting "extra" Z)
             //
-            // R1 = HSET2.GE.BF(threadIdx, wrapIndex)                             (threadIdx >= wrap_index) ? : 1.0 : 0.0
-            // R2 = R0 - (R1 * Z)                                                 threadIdx + Z - COND(Z)                    (always positive, can be fp16 denormalized)
+            // R1 = HSET2.LT.BF(threadIdx, wrapIndex)                             (threadIdx < wrap_index) ? : 1.0 : 0.0
+            // R2 = (R1 * Z) + threadIdx                                          threadIdx + Z - COND(Z)                    (always positive, can be fp16 denormalized)
             // dp2a.lo.s32.s32 ADDR_0, R2, 0x00 00 00 sz, COL_IDX_SHIFT_LOW;      [col_idx * Z + shift + threadIdx - COND(Z)] * sizeof(T)
             // dp2a.hi.s32.s32 ADDR_1, R2, 0x00 sz 00 00, COL_IDX_SHIFT_HIGH; 
 
@@ -210,8 +225,8 @@ struct app_loc_address_fp_dp_desc
             const int32_t COL_IDX_SHIFT_HIGH = bg_desc.nodes[PAIR_OFFSET + i].col_Z_shift_high;
             WRAP_INDEX.u32                   = bg_desc.nodes[PAIR_OFFSET + i].wrap_index;
             
-            R1                   = hset2_bf_ge(tIdx_tIdx, WRAP_INDEX);          // R1 = HSET2.GE.BF(threadIdx, WRAP_INDEX)  (HSET2.BF instruction)
-            R2                   = hfma2(hneg2(R1), Z_Z, tIdx_Z);               // R2 = threadIdx + Z - COND(Z)
+            R1                   = hset2_bf_lt(tIdx_tIdx, WRAP_INDEX);          // R1 = HSET2.LT.BF(threadIdx, WRAP_INDEX)  (HSET2.BF instruction)
+            R2                   = hfma2(R1, Z_Z, tIdx_tIdx);                   // R2 = threadIdx + Z - COND(Z)
 
             //if((0 == CHECK_IDX) && (0 == threadIdx.x) && (0 == i))
             //{

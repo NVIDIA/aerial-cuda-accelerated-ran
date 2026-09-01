@@ -32,6 +32,12 @@ using namespace ldpc2;
 
 #define USE_APP_ADDR_FP_DP 1
 
+#if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 11)
+#define LDPC2_GRID_CONST __grid_constant__ const
+#else
+#define LDPC2_GRID_CONST const
+#endif
+
 namespace
 {
     // Single set of values for all kernels in this module, for now...
@@ -47,6 +53,8 @@ namespace
     // Number of per-row storage words
     [[maybe_unused]] const int NUM_STORAGE_WORDS_BG1 = 10;
     [[maybe_unused]] const int NUM_STORAGE_WORDS_BG2 = 5;
+    [[maybe_unused]] const int NUM_STORAGE_WORDS_BG1_FAST_CORE    = NUM_STORAGE_WORDS_BG1;
+    [[maybe_unused]] const int NUM_STORAGE_WORDS_BG1_FAST_NONCORE = 8;
 
     // APP address calculation
     // Using floating point instruction APP address calculation
@@ -81,6 +89,46 @@ namespace
                                                                                CHECK_IDX,
                                                                                TC2VStorage,
                                                                                box_plus_row_proc<box_plus_op>>;
+
+    //------------------------------------------------------------------
+    // Kernel configuration structure with split C2V storage for core
+    // and non-core parity rows.
+    template <int   BG_,
+              int   NUM_STORAGE_WORDS_CORE,
+              int   NUM_STORAGE_WORDS_NONCORE,
+              int   MAX_PARITY_ROWS,
+              class TKernelParams>
+    struct ldpc2_reg_box_plus_kernel_config_core_split
+    {
+        static constexpr int BG              = BG_;
+        static constexpr int MIN_PARITY_ROWS = 4;
+
+        static_assert(BG == 1,
+                      "Core-split fast configuration is only valid for BG1");
+
+        typedef TKernelParams kernel_params_t;
+
+        typedef C2V_row_proc<__half,
+                             BG,
+                             box_plus_all_row_map_t,
+                             app_loader,
+                             app_writer> c2v_t;
+
+        typedef ldpc2::c2v_cache_register_flat_bg1<MAX_PARITY_ROWS,
+                                                   c2v_t,
+                                                   kernel_params_t> c2v_cache_t;
+
+        typedef ldpc2::llr_loader_variable_batch<__half, 4, llr_op_clamp> llr_loader_t;
+        typedef typename llr_loader_t::app_buf_t                          app_buf_t;
+
+        typedef ldpc2::ldpc_schedule_dynamic_desc<BG,
+                                                  app_loc_t<BG_>,
+                                                  c2v_cache_t,
+                                                  kernel_params_t,
+                                                  typename app_loc_t<BG_>::bg_desc_t,
+                                                  MIN_PARITY_ROWS,
+                                                  MAX_PARITY_ROWS> sched_t;
+    };
     //------------------------------------------------------------------
     // Kernel configuration structure, with typedefs for kernel execution
     // BG_: base graph (1 or 2)
@@ -266,6 +314,52 @@ void ldpc2_BG1_reg_box_plus_tb(cuphyLDPCDecodeDesc_t decodeDesc, app_loc_t<1>::b
 }
 
 ////////////////////////////////////////////////////////////////////////
+// ldpc2_BG1_reg_box_plus_tb_Z384_fast()
+// Base graph 1 kernel, transport block interface, optimized dispatch
+// target for Z=384 parity[4..46] max_iterations>0.
+extern "C"
+__global__ __launch_bounds__(MAX_THREADS_PER_CTA, MIN_CTA_PER_SM)
+void ldpc2_BG1_reg_box_plus_tb_Z384_fast(LDPC2_GRID_CONST cuphyLDPCDecodeDesc_t decodeDesc,
+                                         LDPC2_GRID_CONST app_loc_t<1>::bg_desc_t bgdesc)
+{
+    // Shared memory is allocated dynamically
+    extern __shared__ char smem[];
+
+    //------------------------------------------------------------------
+    // Kernel configuration template
+    typedef ldpc2_reg_box_plus_kernel_config_core_split<1,
+                                                        NUM_STORAGE_WORDS_BG1_FAST_CORE,
+                                                        NUM_STORAGE_WORDS_BG1_FAST_NONCORE,
+                                                        MAX_NUM_PARITY_BG1,
+                                                        cuphyLDPCDecodeConfigDesc_t> kernel_config_t;
+
+    //------------------------------------------------------------------
+    // Load LLR data from global to shared memory
+    kernel_config_t::llr_loader_t::load_sync(smem, decodeDesc, blockIdx.x);
+
+    //------------------------------------------------------------------
+    // Perform iterations
+    kernel_config_t::sched_t sched(decodeDesc.config,
+                                   bgdesc,
+                                   static_cast<int>(__cvta_generic_to_shared(smem)),
+                                   threadIdx.x);
+    for(int iter = 0; iter < decodeDesc.config.max_iterations; ++iter)
+    {
+        sched.do_iteration();
+    }
+
+    //------------------------------------------------------------------
+    // Write hard output based on APP values
+    ldpc_dec_output_variable_loop(decodeDesc, reinterpret_cast<const kernel_config_t::app_buf_t*>(smem));
+    //------------------------------------------------------------------
+    // Write soft outputs if the caller requested
+    if(0 != (decodeDesc.config.flags & CUPHY_LDPC_DECODE_WRITE_SOFT_OUTPUTS))
+    {
+        ldpc_dec_soft_output(decodeDesc, reinterpret_cast<const kernel_config_t::app_buf_t*>(smem));
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
 // ldpc2_BG2_reg_box_plus_tb()
 // Base graph 2 kernel, transport block interface
 extern "C"
@@ -419,6 +513,14 @@ cuphyStatus_t reg_box_plus::decode_tb(ldpc::decoder&               dec,
         case 1:
             {
                 //------------------------------------------------------------------
+                // Fast-path condition for native BG1 TB kernel dispatch.
+                const bool fast_path_eligible =
+                    (decodeDesc.config.Z == 384) &&
+                    (decodeDesc.config.num_parity_nodes >= 4) &&
+                    (decodeDesc.config.num_parity_nodes <= MAX_NUM_PARITY_BG1) &&
+                    (decodeDesc.config.max_iterations > 0);
+
+                //------------------------------------------------------------------
                 // Determine the dynamic amount of shared memory
                 const uint32_t SHMEM_SIZE = shmem_llr_buffer_size(decodeDesc.config.num_parity_nodes + max_info_nodes<1>::value, // num shared memory nodes
                                                                   decodeDesc.config.Z,                                           // lifting size
@@ -428,12 +530,25 @@ cuphyStatus_t reg_box_plus::decode_tb(ldpc::decoder&               dec,
                 // Retrieve the base graph descriptor
                 const app_loc_t<1>::bg_desc_t* bgdesc = app_loc_t<1>::get_bg_desc(decodeDesc.config.Z);
                 if(!bgdesc) break;
-                
-                DEBUG_PRINT_FUNC_MAX_BLOCKS(ldpc2_BG1_reg_box_plus_tb, blkDim, SHMEM_SIZE);
+
+                DEBUG_PRINTF("ldpc2::reg_box_plus::decode_tb() BG1 dispatch: Z=%d parity=%d max_iter=%d fast=%d\n",
+                             decodeDesc.config.Z,
+                             decodeDesc.config.num_parity_nodes,
+                             decodeDesc.config.max_iterations,
+                             static_cast<int>(fast_path_eligible));
 
                 //------------------------------------------------------------------
                 // Launch the kernel
-                ldpc2_BG1_reg_box_plus_tb<<<grdDim, blkDim, SHMEM_SIZE, strm>>>(decodeDesc, *bgdesc);
+                if(fast_path_eligible)
+                {
+                    DEBUG_PRINT_FUNC_MAX_BLOCKS(ldpc2_BG1_reg_box_plus_tb_Z384_fast, blkDim, SHMEM_SIZE);
+                    ldpc2_BG1_reg_box_plus_tb_Z384_fast<<<grdDim, blkDim, SHMEM_SIZE, strm>>>(decodeDesc, *bgdesc);
+                }
+                else
+                {
+                    DEBUG_PRINT_FUNC_MAX_BLOCKS(ldpc2_BG1_reg_box_plus_tb, blkDim, SHMEM_SIZE);
+                    ldpc2_BG1_reg_box_plus_tb<<<grdDim, blkDim, SHMEM_SIZE, strm>>>(decodeDesc, *bgdesc);
+                }
                 s = CUPHY_STATUS_SUCCESS;
             }
             break;
@@ -503,12 +618,13 @@ reg_box_plus::reg_box_plus(ldpc::decoder& desc)
     //------------------------------------------------------------------
     // For each kernel, set the maximum dynamic shared memory size
     typedef std::pair<const void*, int> func_attr_t;
-    std::array<func_attr_t, 4> func_attrs =
+    std::array<func_attr_t, 5> func_attrs =
     {
         func_attr_t((const void*)ldpc2_BG1_reg_box_plus,    MAX_BG1_SHMEM_SIZE),
         func_attr_t((const void*)ldpc2_BG2_reg_box_plus,    MAX_BG2_SHMEM_SIZE),
         func_attr_t((const void*)ldpc2_BG1_reg_box_plus_tb, MAX_BG1_SHMEM_SIZE),
-        func_attr_t((const void*)ldpc2_BG2_reg_box_plus_tb, MAX_BG2_SHMEM_SIZE)
+        func_attr_t((const void*)ldpc2_BG2_reg_box_plus_tb, MAX_BG2_SHMEM_SIZE),
+        func_attr_t((const void*)ldpc2_BG1_reg_box_plus_tb_Z384_fast, MAX_BG1_SHMEM_SIZE)
     };
     for(func_attr_t f_a : func_attrs)
     {
@@ -521,10 +637,22 @@ reg_box_plus::reg_box_plus(ldpc::decoder& desc)
         }
     }
     //------------------------------------------------------------------
+    // Favor shared memory for the BG1 Z384 fast kernel.
+    {
+        cudaError_t e = cudaFuncSetAttribute((const void*)ldpc2_BG1_reg_box_plus_tb_Z384_fast,
+                                             cudaFuncAttributePreferredSharedMemoryCarveout,
+                                             0);
+        if(cudaSuccess != e)
+        {
+            throw cuphy_i::cuda_exception(e);
+        }
+    }
+    //------------------------------------------------------------------
     DEBUG_PRINT_FUNC_ATTRIBUTES(ldpc2_BG1_reg_box_plus);
     DEBUG_PRINT_FUNC_ATTRIBUTES(ldpc2_BG2_reg_box_plus);
     DEBUG_PRINT_FUNC_ATTRIBUTES(ldpc2_BG1_reg_box_plus_tb);
     DEBUG_PRINT_FUNC_ATTRIBUTES(ldpc2_BG2_reg_box_plus_tb);
+    DEBUG_PRINT_FUNC_ATTRIBUTES(ldpc2_BG1_reg_box_plus_tb_Z384_fast);
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -540,6 +668,13 @@ cuphyStatus_t reg_box_plus::get_launch_config(const ldpc::decoder&           dec
                                  max_parity_nodes<2>::value;
     const int NUM_VAR_NODES    = ldpc::decoder::get_num_variable_nodes(BG,
                                                                        NUM_PARITY_NODES);
+    const bool FAST_BG1_Z384_ELIGIBLE =
+        (1 == BG) &&
+        (launchConfig.decode_desc.config.llr_type == CUPHY_R_16F) &&
+        (Z == 384) &&
+        (NUM_PARITY_NODES >= 4) &&
+        (NUM_PARITY_NODES <= MAX_NUM_PARITY_BG1) &&
+        (launchConfig.decode_desc.config.max_iterations > 0);
     //------------------------------------------------------------------
     // Validate input arguments
     if((Z < 2)                              ||
@@ -569,8 +704,18 @@ cuphyStatus_t reg_box_plus::get_launch_config(const ldpc::decoder&           dec
 
     cudaFunction_t deviceFunction;
     MemtraceDisableScope md;
-    cudaError_t    e = (BG == 1) ?  cudaGetFuncBySymbol(&deviceFunction, (void*)ldpc2_BG1_reg_box_plus_tb): 
-                                    cudaGetFuncBySymbol(&deviceFunction, (void*)ldpc2_BG2_reg_box_plus_tb);
+    cudaError_t e;
+    if(BG == 1)
+    {
+        const void* bg1_func = FAST_BG1_Z384_ELIGIBLE ?
+                               (const void*)ldpc2_BG1_reg_box_plus_tb_Z384_fast :
+                               (const void*)ldpc2_BG1_reg_box_plus_tb;
+        e = cudaGetFuncBySymbol(&deviceFunction, bg1_func);
+    }
+    else
+    {
+        e = cudaGetFuncBySymbol(&deviceFunction, (void*)ldpc2_BG2_reg_box_plus_tb);
+    }
     if (e != cudaSuccess) 
     {
         return CUPHY_STATUS_INTERNAL_ERROR;

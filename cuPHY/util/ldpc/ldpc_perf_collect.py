@@ -84,8 +84,8 @@ parser.add_argument("--snr_step",              type=float, default=0.1,         
 parser.add_argument("-S", "--snr",             type=float, default=10.0,                          help="SNR (latency mode only)")
 parser.add_argument("--normalization",         type=float,                                        help="Min-sum normalization factor")
 parser.add_argument("--min_block_errors",      type=int,                                          help="Loop until the at least the given number of block errors occurs")
-parser.add_argument("--BER",                   type=float,                                        help="Target BER in SNR search mode. (BER or BLER must be provided.")
-parser.add_argument("--BLER",                  type=float,                                        help="Target BLER in SNR search mode. (BER or BLER must be provided.")
+parser.add_argument("--BER",                   type=float,                                        help="Target BER in SNR search mode, or stored-target lookup in latency mode. (BER or BLER must be provided.)")
+parser.add_argument("--BLER",                  type=float,                                        help="Target BLER in SNR search mode, or stored-target lookup in latency mode. (BER or BLER must be provided.)")
 args = parser.parse_args()
 
 db_name = 'ldpc_perf_database.json'
@@ -106,8 +106,13 @@ def get_comparison_results(cfile):
         fields = line.split()
         # File format assumed:
         # num_parity  latency BER BLER throughput
+        # or:
+        # num_parity  SNR latency BER BLER throughput
         mb = int(fields[0])
-        res[mb] = [float(fields[1]), float(fields[2]), float(fields[3]), float(fields[4])]
+        if len(fields) >= 6:
+            res[mb] = [float(fields[2]), float(fields[3]), float(fields[4]), float(fields[5])]
+        else:
+            res[mb] = [float(fields[1]), float(fields[2]), float(fields[3]), float(fields[4])]
     return res
 
 ########################################################################
@@ -228,7 +233,7 @@ def run_config(params, verbose):
     if verbose:
         print(cmd)
     #-------------------------------------------------------------------
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
     res = {}
     while True:
         line = proc.stdout.readline().decode('ascii')
@@ -269,6 +274,25 @@ def run_config(params, verbose):
 # do_latency_mode()
 def do_latency_mode():
     results = []
+    db = None
+    target_type = None
+    target_value = None
+
+    if args.BER is not None:
+        if args.BER <= 0:
+            raise RuntimeError('BER must be greater than zero')
+        target_type = 'BER'
+        target_value = args.BER
+    elif args.BLER is not None:
+        if args.BLER <= 0:
+            raise RuntimeError('BLER must be greater than zero')
+        target_type = 'BLER'
+        target_value = args.BLER
+
+    if target_type:
+        if args.input_file:
+            raise RuntimeError('Stored target-SNR lookup is not supported with input files')
+        db = ldpc_perf_database(db_name)
 
     params = {'exe'               : args.exe,
               'exe_dir'           : args.exe_dir,
@@ -298,14 +322,28 @@ def do_latency_mode():
     # Iterate over code rates (i.e. number of parity nodes)
     for mb in range(args.min_num_parity, max_num_parity_value + 1):
         params['num_parity'] = mb
-        results.append(run_config(params, True))
+        if target_type:
+            stored_snr = db.get_target_SNR(args, target_type, target_value, mb)
+            if stored_snr is None:
+                raise RuntimeError('No stored SNR found for BG = %d, Z = %d, num_parity = %d, %s = %s. Run mode SNR first.' %
+                                   (args.bg, args.lifting_size, mb, target_type, target_value_key(target_value)))
+            params['snr'] = stored_snr
+        res = run_config(params, True)
+        res['snr'] = params['snr']
+        results.append(res)
 
     for r in results:
-        print('%2d %7.1f %e %e %.2f' % (r['num_parity'], r['latency'], r['bit_error_rate'], r['block_error_rate'], r['throughput']))
+        if target_type:
+            print('%2d %8.4f %7.1f %e %e %.2f' % (r['num_parity'], r['snr'], r['latency'], r['bit_error_rate'], r['block_error_rate'], r['throughput']))
+        else:
+            print('%2d %7.1f %e %e %.2f' % (r['num_parity'], r['latency'], r['bit_error_rate'], r['block_error_rate'], r['throughput']))
     if args.output_file:
         with open(args.output_file, 'w') as f:
             for r in results:
-                f.write('%2d %7.1f %e %e %.2f\n' % (r['num_parity'], r['latency'], r['bit_error_rate'], r['block_error_rate'], r['throughput']))
+                if target_type:
+                    f.write('%2d %8.4f %7.1f %e %e %.2f\n' % (r['num_parity'], r['snr'], r['latency'], r['bit_error_rate'], r['block_error_rate'], r['throughput']))
+                else:
+                    f.write('%2d %7.1f %e %e %.2f\n' % (r['num_parity'], r['latency'], r['bit_error_rate'], r['block_error_rate'], r['throughput']))
     if args.compare_file:
         max_pct_change = 0
         prev_res = get_comparison_results(args.compare_file)
@@ -494,6 +532,11 @@ def set_item_recursive(d, key_list, value):
         set_item_recursive(d, key_list[1:], value)
     else:
         d[k] = value # Set value for last key in list
+
+#***********************************************************************
+# target_value_key()
+def target_value_key(value):
+    return ('%.12g' % value)
 
 #***********************************************************************
 # find_SNR_value()
@@ -699,6 +742,29 @@ class ldpc_perf_database:
         r = find_item_recursive(self.db_dict, key_list)
         return r
     #-------------------------------------------------------------------
+    # get_target_SNR()
+    # Returns a previously measured SNR for a target BER/BLER.
+    def get_target_SNR(self, args, type_str, value, num_parity):
+        key_list = ['%d' % args.bg,
+                    '%d' % args.lifting_size,
+                    'target_snr',
+                    type_str,
+                    target_value_key(value),
+                    '%d' % num_parity]
+        return find_item_recursive(self.db_dict, key_list)
+    #-------------------------------------------------------------------
+    # set_target_SNR()
+    # Stores an SNR for a target BER/BLER.
+    def set_target_SNR(self, args, type_str, value, num_parity, snr):
+        key_list = ['%d' % args.bg,
+                    '%d' % args.lifting_size,
+                    'target_snr',
+                    type_str,
+                    target_value_key(value),
+                    '%d' % num_parity]
+        set_item_recursive(self.db_dict, key_list, snr)
+        self.updated = True
+    #-------------------------------------------------------------------
     # get_SNR_opt_range()
     # Returns an SNR range useful for optimizing normalization values.
     # This can be different than the nominal SNR range returned by
@@ -896,6 +962,7 @@ def do_find_SNR_mode():
         value_tol = 1.05
     print('Performing SNR search for %s = %f, log10(value) = %f, tolerance = %f, log10(tolerance) = %f' %
           (value_type, value, math.log10(value), value_tol, math.log10(value_tol)))
+    db = ldpc_perf_database(db_name)
     max_num_parity_value = max_num_parity[params['BG']] if args.max_num_parity < 0 else args.max_num_parity
     # Iterate over code rates (i.e. number of parity nodes)
     for mb in range(args.min_num_parity, max_num_parity_value + 1):
@@ -903,6 +970,8 @@ def do_find_SNR_mode():
         print('BG = %i, Z = %i, num_parity = %i' % (args.bg, args.lifting_size, mb))
         SNR = find_SNR_value(params, value_type, value, value_tol, args.min_block_errors)
         snr_results.append((mb, SNR))
+        db.set_target_SNR(args, value_type, value, mb, SNR)
+    db.store()
     # Run again at the calculated SNR, to observe how "close" we are to the target value
     test_results = []
     for r in snr_results:
