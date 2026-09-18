@@ -498,8 +498,9 @@ def get_num_code_blocks(tb_size: int, code_rate: float) -> int:
     # Check if this TB size requires code block segmentation.
     crc_len = 24
     max_cb_size = max_code_block_size(base_graph)
-    if tb_size > max_cb_size:
-        num_code_blocks = math.ceil(tb_size / (max_cb_size - crc_len))
+    tb_size_with_crc = add_crc_len(tb_size)
+    if tb_size_with_crc > max_cb_size:
+        num_code_blocks = math.ceil(tb_size_with_crc / (max_cb_size - crc_len))
     else:
         num_code_blocks = 1
 
