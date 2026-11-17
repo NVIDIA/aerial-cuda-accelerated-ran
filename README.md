@@ -25,24 +25,24 @@ The **Aerial CUDA-Accelerated RAN** SDK includes:
 
 ```
 aerial-cuda-accelerated-ran/
-├── cuPHY/              # CUDA-accelerated Physical Layer (L1)
-├── cuPHY-CP/           # Control Plane and integration components
-│   ├── aerial-fh-driver/    # Fronthaul driver for O-RAN interfaces
-│   ├── cuphycontroller/     # PHY controller
-│   ├── cuphydriver/         # PHY driver
-│   ├── cuphyl2adapter/      # L2 adapter
-│   ├── ru-emulator/         # Radio Unit emulator
+├── cuPHY/                  # CUDA-accelerated Physical Layer (L1)
+├── cuPHY-CP/               # Control Plane and integration components
+│   ├── aerial-fh-driver/   # Fronthaul driver for O-RAN interfaces
+│   ├── cuphycontroller/    # PHY controller
+│   ├── cuphydriver/        # PHY driver
+│   ├── cuphyl2adapter/     # L2 adapter
+│   ├── ru-emulator/        # Radio Unit emulator
 │   ├── testMAC/            # Test MAC implementation
 │   ├── container/          # Container build scripts and recipes
 │   ├── data_lake/          # data lake and E3 agent
 │   └── e3agent-standalone/ # E3 Agent standalone
-├── cuMAC/              # CUDA-accelerated L2 Layer
-├── cuMAC-CP/           # MAC Control Plane components
-├── pyaerial/           # Python API and ML/AI tools
-├── 5GModel/            # TV generation for cuPHY and cuBB verification
-├── testBenches/        # Test benches and performance measurement tools
-├── testVectors/        # Test vectors for validation
-└── cubb_scripts/       # Build and automation scripts
+├── cuMAC/                  # CUDA-accelerated L2 Layer
+├── cuMAC-CP/               # MAC Control Plane components
+├── pyaerial/               # Python API and ML/AI tools
+├── 5GModel/                # TV generation for cuPHY and cuBB verification
+├── testBenches/            # Test benches and performance measurement tools
+├── testVectors/            # Test vectors for validation
+└── cubb_scripts/           # Build and automation scripts
 ```
 
 ## Getting Started
