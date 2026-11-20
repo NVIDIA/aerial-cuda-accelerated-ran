@@ -172,22 +172,23 @@ bool tensor_layout_any::validate(int             numDim,
     if(str)
     {
         // Make sure that strides describe a non-overlapping tensor
-        std::vector<int> strides(numDim), strides_sorted(numDim);
-        std::vector<int> dims(numDim), dims_sorted(numDim);
-        std::vector<std::size_t> indices(numDim);
+        std::array<int, CUPHY_DIM_MAX> strides{}, strides_sorted{};
+        std::array<int, CUPHY_DIM_MAX> dims{}, dims_sorted{};
+        std::array<std::size_t, CUPHY_DIM_MAX> indices{};
+        const auto indicesEnd = indices.begin() + numDim;
 
         // Sorting first based on dims to get rid of the case where one dimension is 1 and some strides thus the same.
-        std::iota(indices.begin(), indices.end(), 0);
-        std::sort(indices.begin(), indices.end(), [&](std::size_t i, std::size_t j){ return dim[i] < dim[j]; });
-        std::transform(indices.begin(), indices.end(), strides.begin(), [&](std::size_t i){ return str[i]; });
-        std::transform(indices.begin(), indices.end(), dims.begin(), [&](std::size_t i){ return dim[i]; });
+        std::iota(indices.begin(), indicesEnd, 0);
+        std::sort(indices.begin(), indicesEnd, [&](std::size_t i, std::size_t j){ return dim[i] < dim[j]; });
+        std::transform(indices.begin(), indicesEnd, strides.begin(), [&](std::size_t i){ return str[i]; });
+        std::transform(indices.begin(), indicesEnd, dims.begin(), [&](std::size_t i){ return dim[i]; });
 
-        std::iota(indices.begin(), indices.end(), 0);
-        std::sort(indices.begin(), indices.end(), [&](std::size_t i, std::size_t j){ return strides[i] < strides[j]; });
+        std::iota(indices.begin(), indicesEnd, 0);
+        std::sort(indices.begin(), indicesEnd, [&](std::size_t i, std::size_t j){ return strides[i] < strides[j]; });
 
         // Apply the sort.
-        std::transform(indices.begin(), indices.end(), strides_sorted.begin(), [&](std::size_t i){ return strides[i]; });
-        std::transform(indices.begin(), indices.end(), dims_sorted.begin(), [&](std::size_t i){ return dims[i]; });
+        std::transform(indices.begin(), indicesEnd, strides_sorted.begin(), [&](std::size_t i){ return strides[i]; });
+        std::transform(indices.begin(), indicesEnd, dims_sorted.begin(), [&](std::size_t i){ return dims[i]; });
 
         // Check.
         for(size_t i = 1; i < numDim; ++i)

@@ -161,6 +161,13 @@ extern "C++" {
     return ul_oran_srs_offset_in_bounds((uint32_t)oran_umsg_get_symbol_id(pkt), start_prb, num_prb,
                                         symbols_x_slot, prbs_per_symbol, start_symbol);
 }
+
+// Symbols below start_symbol wrap to a huge unsigned value, so one compare bounds both ends.
+[[nodiscard]] __device__ __forceinline__ bool ul_oran_srs_symbol_in_window(
+    uint32_t symbol_id, uint32_t start_symbol, uint32_t symbols_x_slot)
+{
+    return (symbol_id - start_symbol) < symbols_x_slot;
+}
 } // extern "C++"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3514,6 +3521,12 @@ __global__ void __launch_bounds__(NUM_THREADS,NUM_CTAS_PER_SM) order_kernel_doca
     uint32_t			srs_prb_x_port_x_symbol_cell=	srs_prb_x_port_x_symbol[cell_idx];
     uint8_t         srs_start_sym_cell=srs_start_sym[cell_idx];
     int srs_prb_x_slot_cell=srs_prb_x_slot[cell_idx];
+    // Combined ordering is selected for the slot; only cells with SRS resources
+    // should use the SRS destination.
+    const bool combined_srs_active_for_cell =
+        (srs_enable == ORDER_KERNEL_SRS_AND_PUSCH) &&
+        (srs_prb_x_slot_cell > 0) &&
+        (srs_buffer_cell != nullptr);
 
     uint8_t*  pcap_buffer_cell       = nullptr;
     uint8_t*  pcap_buffer_ts_cell    = nullptr;
@@ -3861,6 +3874,7 @@ __global__ void __launch_bounds__(NUM_THREADS,NUM_CTAS_PER_SM) order_kernel_doca
                         uint8_t *gbuf_offset_ptr;
                         uint8_t *gbuf_offset_ptr_srs = NULL;
                         uint8_t *buffer;
+                        bool combined_srs_packet = false;
 
                         if constexpr (srs_enable==ORDER_KERNEL_SRS_ENABLE){
                             buffer = srs_buffer_cell;
@@ -3883,9 +3897,10 @@ __global__ void __launch_bounds__(NUM_THREADS,NUM_CTAS_PER_SM) order_kernel_doca
                                     gbuf_offset_ptr = buffer + oran_get_offset_from_hdr(pkt_thread,
                                                              (uint16_t)get_eaxc_index(pusch_eAxC_map_cell, pusch_eAxC_num_cell, oran_umsg_get_flowid(pkt_thread)),
                                                              pusch_symbols_x_slot, pusch_prb_x_port_x_symbol_cell, prb_size, start_prb);
-                                    if(symbol_id_pkt == srs_start_sym_cell) {
-                                        buffer = srs_buffer_cell;
-                                        gbuf_offset_ptr_srs = buffer + oran_srs_get_offset_from_hdr(pkt_thread,
+                                    if(combined_srs_active_for_cell &&
+                                       ul_oran_srs_symbol_in_window(symbol_id_pkt, srs_start_sym_cell, srs_symbols_x_slot)) {
+                                        combined_srs_packet = true;
+                                        gbuf_offset_ptr_srs = srs_buffer_cell + oran_srs_get_offset_from_hdr(pkt_thread,
                                                                     (uint16_t)get_eaxc_index(srs_eAxC_map_cell, srs_eAxC_num_cell, oran_umsg_get_flowid(pkt_thread)),
                                                                     srs_symbols_x_slot, srs_prb_x_port_x_symbol_cell, prb_size, start_prb, srs_start_sym_cell);
 
@@ -3925,7 +3940,7 @@ __global__ void __launch_bounds__(NUM_THREADS,NUM_CTAS_PER_SM) order_kernel_doca
                             else if(section_id < prach_section_id_0)
                             {
                                 ob = !ul_oran_offset_in_bounds(symbol_id_pkt, start_prb, num_prb, pusch_symbols_x_slot, pusch_prb_x_port_x_symbol_cell);
-                                if(srs_enable==ORDER_KERNEL_SRS_AND_PUSCH && symbol_id_pkt == srs_start_sym_cell)
+                                if(combined_srs_packet)
                                     ob = ob || !ul_oran_srs_offset_in_bounds(symbol_id_pkt, start_prb, num_prb, srs_symbols_x_slot, srs_prb_x_port_x_symbol_cell, srs_start_sym_cell);
                             }
                             else
@@ -3939,18 +3954,27 @@ __global__ void __launch_bounds__(NUM_THREADS,NUM_CTAS_PER_SM) order_kernel_doca
                             {
                                 for(int index_copy = laneId; index_copy < (num_prb * prb_size); index_copy += 32)
                                     gbuf_offset_ptr[index_copy] = pkt_offset_ptr[index_copy];
+
+                                if(combined_srs_packet) {
+                                    for(int index_copy = laneId; index_copy < (num_prb * prb_size); index_copy += 32)
+                                        gbuf_offset_ptr_srs[index_copy] = pkt_offset_ptr[index_copy];
+                                }
                             }
                             else
                             {
                                 decompress_scale_blockFP<false>((unsigned char*)pkt_offset_ptr, (__half*)gbuf_offset_ptr, beta_cell, num_prb, bit_width_cell, (int)(threadIdx.x & 31), 32);
 
-                                if(srs_enable==ORDER_KERNEL_SRS_AND_PUSCH && buffer == srs_buffer_cell) { // Copy it to both places. Could also create a function with two output pointers.
+                                if(combined_srs_packet) {
                                     decompress_scale_blockFP<false>((unsigned char*)pkt_offset_ptr, (__half*)gbuf_offset_ptr_srs, beta_cell, num_prb, bit_width_cell, (int)(threadIdx.x & 31), 32);
                                 }
                             }
                         } else // aerial_fh::UserDataCompressionMethod::NO_COMPRESSION
                         {
                             decompress_scale_fixed<false>(pkt_offset_ptr, (__half*)gbuf_offset_ptr, beta_cell, num_prb, bit_width_cell, (int)(threadIdx.x & 31), 32);
+
+                            if(combined_srs_packet) {
+                                decompress_scale_fixed<false>(pkt_offset_ptr, (__half*)gbuf_offset_ptr_srs, beta_cell, num_prb, bit_width_cell, (int)(threadIdx.x & 31), 32);
+                            }
                         }
                         if (laneId == 0) {
                             if constexpr (srs_enable==ORDER_KERNEL_SRS_ENABLE)
@@ -3972,7 +3996,7 @@ __global__ void __launch_bounds__(NUM_THREADS,NUM_CTAS_PER_SM) order_kernel_doca
                                     }
                                     warp_pusch_ordered_prbs_cell += num_prb;
                                     warp_pusch_ordered_prbs_cell_this_burst += num_prb;
-                                    if(buffer == srs_buffer_cell) {
+                                    if(combined_srs_packet) {
                                         warp_srs_ordered_prbs_cell += num_prb;
                                     }
                                 } else {

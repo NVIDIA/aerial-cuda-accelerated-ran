@@ -41,7 +41,13 @@ constexpr uint32_t fourcc(char a, char b, char c, char d) {
 }
 
 constexpr uint32_t MAGIC   = fourcc('E', '3', 'R', 'T'); // E3 Replay Trace
-constexpr uint32_t VERSION = 0x010100;                   // v1.1.0 (dApps sample apps)
+constexpr uint32_t VERSION = 0x010200;                   // v1.2.0
+// v1.1.0 traces are also accepted. They do not record n_prb_ul_bwp (the
+// PuschSlotHeader is 2 B shorter, the SrsSlotHeader has an unused field there),
+// so replay assumes 273 PRB, correct only for 100 MHz captures. Their
+// SrsUeMetrics ends before sequence_id, so streams 81-86 replay as 0.
+constexpr uint32_t VERSION_1_1       = 0x010100;
+constexpr uint16_t V1_1_N_PRB_UL_BWP = 273;
 
 enum Tag : uint16_t {
 	TAG_PUSCH = 1,
@@ -80,6 +86,7 @@ struct PuschSlotHeader {
 	uint8_t  n_bs_ants;
 	uint8_t  reserved;
 	uint16_t n_ue;
+	uint16_t n_prb_ul_bwp;
 } __attribute__((packed));
 
 // Mirrors E3UeMetrics; h_offset/h_size index into the slot hest blob.
@@ -129,7 +136,7 @@ struct SrsSlotHeader {
 	uint8_t  srs_cell_start_sym;
 	uint8_t  srs_cell_n_srs_sym;
 	uint16_t n_srs_ue;
-	uint16_t reserved;
+	uint16_t n_prb_ul_bwp;
 } __attribute__((packed));
 
 // Mirrors E3SrsUeMetrics minus SHM row offsets (recomputed on packing);
@@ -163,15 +170,21 @@ struct SrsUeMetrics {
 	uint16_t n_prb_grps;
 	uint32_t srs_hest_size;
 	uint32_t srs_rb_snr_size;
+	uint16_t sequence_id;
+	uint8_t  config_idx;
+	uint8_t  bandwidth_idx;
+	uint8_t  group_seq_hopping;
+	uint16_t start_prg;
+	uint16_t start_valid_prg;
 } __attribute__((packed));
 
 static_assert(sizeof(FileHeader) == 16, "FileHeader layout");
 static_assert(sizeof(RecordHeader) == 8, "RecordHeader layout");
 static_assert(sizeof(BlobHeader) == 4, "BlobHeader layout");
-static_assert(sizeof(PuschSlotHeader) == 32, "PuschSlotHeader layout");
+static_assert(sizeof(PuschSlotHeader) == 34, "PuschSlotHeader layout");
 static_assert(sizeof(PuschUeMetrics) == 73, "PuschUeMetrics layout");
 static_assert(sizeof(SrsSlotHeader) == 32, "SrsSlotHeader layout");
-static_assert(sizeof(SrsUeMetrics) == 65, "SrsUeMetrics layout");
+static_assert(sizeof(SrsUeMetrics) == 74, "SrsUeMetrics layout");
 
 } // namespace trace
 } // namespace e3sa

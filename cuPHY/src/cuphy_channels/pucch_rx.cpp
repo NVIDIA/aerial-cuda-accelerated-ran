@@ -891,12 +891,18 @@ void PucchRx::bindFrontEndLlrOutputAddrs()
     {
         for(auto i = 0; i < m_cuphyPucchStatPrms.nMaxCellsPerSlot; i++)
         {
-            const auto cellIdx  = m_pCellDynPrms[i].cellPrmStatIdx;
-            const int  NF       = CUPHY_N_TONES_PER_PRB * m_pCellStatPrms[cellIdx].nPrbUlBwp;
-            const int  NT       = 14;
-            const int  N_BS_ANT = m_pCellStatPrms[cellIdx].nRxAnt;
-
-            m_tRefDataRxBufCpu[i].desc().set(CUPHY_C_16F, NF, NT, N_BS_ANT, cuphy::tensor_flags::align_tight);
+            const auto      cellIdx = m_pCellDynPrms[i].cellPrmStatIdx;
+            cuphyDataType_t dataType;
+            int             rank;
+            int             dims[CUPHY_DIM_MAX];
+            int             strides[CUPHY_DIM_MAX];
+            if(cuphyGetTensorDescriptor(m_tPrmDataRxBufCpu[i].desc, CUPHY_DIM_MAX, &dataType, &rank, dims, strides) != CUPHY_STATUS_SUCCESS ||
+               dataType == CUPHY_VOID)
+            {
+                continue;
+            }
+            dims[0] = std::min(dims[0], CUPHY_N_TONES_PER_PRB * static_cast<int>(m_pCellStatPrms[cellIdx].nPrbUlBwp));
+            CUPHY_CHECK(cuphySetTensorDescriptor(m_tRefDataRxBufCpu[i].desc().handle(), dataType, rank, dims, strides, CUPHY_TENSOR_ALIGN_DEFAULT));
             m_tRefDataRxBufCpu[i].set_addr(m_tPrmDataRxBufCpu[i].pAddr);
         }
     }

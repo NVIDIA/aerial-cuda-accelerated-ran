@@ -133,6 +133,12 @@ void Feeder::puschLoop(std::atomic<bool>& stop, timespec next) {
 			bi.timestamp_tai_ns = tai_base_ns_ + abs_slot * tick_ns;
 			synth::fillPusch(bi, synth_.n_cells);
 
+			// PUSCH rows count UE records; all cells of the slot share one base row.
+			uint32_t slot_ues = 0;
+			for (const auto& cell : bi.cells) slot_ues += cell.ues.size();
+			pusch.reserve(slot_ues, rows_.pusch);
+			const uint32_t pusch_row = pusch.row;
+
 			// One FH row + one H-est row per cell. Copy the blobs into SHM (lock-free vs
 			// dApp reader), then publish all cell indices at once under the lock.
 			for (uint16_t c = 0; c < synth_.n_cells; ++c) {
@@ -158,8 +164,8 @@ void Feeder::puschLoop(std::atomic<bool>& stop, timespec next) {
 				hest.advance(rows_.hest);
 
 				cell.current_pusch_buffer = pusch.half;
-				cell.pusch_write_index = pusch.row;
-				pusch.advance(rows_.pusch);
+				cell.pusch_write_index = pusch_row;
+				for (auto& m : cell.ues) pusch.placePdu(m);
 			}
 
 			{
@@ -201,6 +207,12 @@ void Feeder::srsLoop(std::atomic<bool>& stop, timespec next) {
 			si.timestamp_tai_ns = tai_base_ns_ + abs_slot * tick_ns;
 			synth::fillSrs(si, synth_.n_cells);
 
+			// H-est and RbSNR rows of all cells share one half; the slot's first row is
+			// the write index of every cell.
+			hest.reserve(synth_.n_cells, rows_.srs_hest);
+			rb.reserve(synth_.n_cells, rows_.srs);
+			const uint32_t hest_row = hest.row, rb_row = rb.row;
+
 			// Per cell: one SRS-IQ row + per-UE H-est/RbSNR rows. Copy the blobs into SHM
 			// (lock-free vs dApp reader), then publish all cell indices at once under the lock.
 			for (uint16_t c = 0; c < synth_.n_cells; ++c) {
@@ -212,7 +224,7 @@ void Feeder::srsLoop(std::atomic<bool>& stop, timespec next) {
 				srs_iq_advance(&qi, iq.row, &srs_iq_table_[ph * synth::kSrsIqSamples],
 					synth::kSrsIqSamples * sizeof(int16_t));
 				cell.current_srs_iq_buffer = iq.half;
-				cell.srs_iq_write_index = iq.row + 1;
+				cell.srs_iq_write_index = iq.row;
 				cell.srs_iq_row_byte_offset = iq_off;
 				iq.advance(rows_.srs_iq);
 
@@ -222,7 +234,7 @@ void Feeder::srsLoop(std::atomic<bool>& stop, timespec next) {
 				srs_hest_advance(&hi, hest.row, &srs_hest_table_[ph * synth::kSrsHestSamples],
 					synth::kSrsHestSamples * sizeof(int16_t));
 				cell.current_srs_hest_buffer = hest.half;
-				cell.srs_hest_write_index = hest.row + 1;
+				cell.srs_hest_write_index = hest_row;
 				hest.advance(rows_.srs_hest);
 
 				srsInfo_t& ri = dl_.srsInfo[rb.half];
@@ -231,7 +243,7 @@ void Feeder::srsLoop(std::atomic<bool>& stop, timespec next) {
 				srs_rb_snr_advance(&ri, rb.row, &srs_rbsnr_table_[ph * synth::kSrsRbSnrSamples],
 					synth::kSrsRbSnrSamples * sizeof(float));
 				cell.current_srs_rb_snr_buffer = rb.half;
-				cell.srs_rb_snr_write_index = rb.row + 1;
+				cell.srs_rb_snr_write_index = rb_row;
 				rb.advance(rows_.srs);
 
 				E3SrsUeMetrics& m = cell.ues[0];

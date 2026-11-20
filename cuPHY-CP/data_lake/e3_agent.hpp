@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <vector>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 
 #include <zmq.hpp>
@@ -141,10 +142,17 @@ enum class StreamType : __uint128_t {
     SRS_N_VALID_PRG       = __uint128_t(1) << 75,
     SRS_PRG_SIZE          = __uint128_t(1) << 76,
     TIMESTAMP_TAI         = __uint128_t(1) << 77,
-    PDU_OFFSET            = __uint128_t(1) << 78
+    PDU_OFFSET            = __uint128_t(1) << 78,
+    N_PRB_UL_BWP          = __uint128_t(1) << 79,
+    SRS_SEQUENCE_ID       = __uint128_t(1) << 80,
+    SRS_CONFIG_IDX        = __uint128_t(1) << 81,
+    SRS_BANDWIDTH_IDX     = __uint128_t(1) << 82,
+    SRS_GROUP_SEQ_HOPPING = __uint128_t(1) << 83,
+    SRS_START_PRG         = __uint128_t(1) << 84,
+    SRS_START_VALID_PRG   = __uint128_t(1) << 85
 };
 
-constexpr uint32_t STREAM_TYPE_COUNT = 79;
+constexpr uint32_t STREAM_TYPE_COUNT = 86;
 
 /** E3AP protocol version supported by this agent implementation */
 constexpr std::string_view E3AP_PROTOCOL_VERSION = "1.0.0";
@@ -184,6 +192,7 @@ constexpr StreamType streamNameToType(const std::string_view stream_name) noexce
     if (stream_name == "cell_id") return StreamType::CELL_ID;
     if (stream_name == "n_rx_ant") return StreamType::N_RX_ANT;
     if (stream_name == "n_rx_ant_srs") return StreamType::N_RX_ANT_SRS;
+    if (stream_name == "n_prb_ul_bwp") return StreamType::N_PRB_UL_BWP;
     if (stream_name == "n_cells") return StreamType::N_CELLS;
     if (stream_name == "n_bs_ants") return StreamType::N_BS_ANTS;
     if (stream_name == "n_layers") return StreamType::N_LAYERS;
@@ -254,6 +263,12 @@ constexpr StreamType streamNameToType(const std::string_view stream_name) noexce
     if (stream_name == "srs_usage") return StreamType::SRS_USAGE;
     if (stream_name == "srs_n_valid_prg") return StreamType::SRS_N_VALID_PRG;
     if (stream_name == "srs_prg_size") return StreamType::SRS_PRG_SIZE;
+    if (stream_name == "srs_sequence_id") return StreamType::SRS_SEQUENCE_ID;
+    if (stream_name == "srs_config_idx") return StreamType::SRS_CONFIG_IDX;
+    if (stream_name == "srs_bandwidth_idx") return StreamType::SRS_BANDWIDTH_IDX;
+    if (stream_name == "srs_group_seq_hopping") return StreamType::SRS_GROUP_SEQ_HOPPING;
+    if (stream_name == "srs_start_prg") return StreamType::SRS_START_PRG;
+    if (stream_name == "srs_start_valid_prg") return StreamType::SRS_START_VALID_PRG;
     return StreamType::NONE;
 }
 
@@ -321,12 +336,15 @@ constexpr StreamType PER_UE_STREAMS =
     StreamType::SRS_FREQ_SHIFT | StreamType::SRS_FREQ_HOPPING |
     StreamType::SRS_RESOURCE_TYPE | StreamType::SRS_T_SRS |
     StreamType::SRS_T_OFFSET | StreamType::SRS_USAGE |
-    StreamType::SRS_N_VALID_PRG | StreamType::SRS_PRG_SIZE;
+    StreamType::SRS_N_VALID_PRG | StreamType::SRS_PRG_SIZE |
+    StreamType::SRS_SEQUENCE_ID | StreamType::SRS_CONFIG_IDX |
+    StreamType::SRS_BANDWIDTH_IDX | StreamType::SRS_GROUP_SEQ_HOPPING |
+    StreamType::SRS_START_PRG | StreamType::SRS_START_VALID_PRG;
 
 // MAINTENANCE: When adding a new StreamType, update exactly one of the two
 // PROVIDABLE masks below and the corresponding notify*() switch cases.
 // Shared streams (TIMESTAMP, TIMESTAMP_TAI, SFN, SLOT, CELL_ID, N_RX_ANT_SRS,
-// N_CELLS, RNTI) must appear in both masks. Also update PER_UE_STREAMS if per-UE.
+// N_PRB_UL_BWP, N_CELLS, RNTI) must appear in both masks. Also update PER_UE_STREAMS if per-UE.
 // The SHARED / *_ONLY masks below are derived automatically — no manual update needed.
 
 // All streams that the PUSCH indication path can provide: PUSCH-specific + shared.
@@ -337,7 +355,7 @@ constexpr StreamType PUSCH_PROVIDABLE_STREAMS =
     StreamType::N_RX_ANT | StreamType::N_BS_ANTS | StreamType::N_UE |
     // Shared cell-level (also provided by SRS path)
     StreamType::TIMESTAMP | StreamType::TIMESTAMP_TAI | StreamType::SFN | StreamType::SLOT |
-    StreamType::CELL_ID | StreamType::N_RX_ANT_SRS | StreamType::N_CELLS |
+    StreamType::CELL_ID | StreamType::N_RX_ANT_SRS | StreamType::N_PRB_UL_BWP | StreamType::N_CELLS |
     // PUSCH-only per-UE
     StreamType::RNTI | StreamType::TB_CRC_FAIL | StreamType::CB_ERRORS |
     StreamType::RSRP | StreamType::NOISE_VAR | StreamType::SINR |
@@ -359,7 +377,7 @@ constexpr StreamType PUSCH_PROVIDABLE_STREAMS =
 constexpr StreamType SRS_PROVIDABLE_STREAMS =
     // Shared cell-level (also provided by PUSCH path)
     StreamType::TIMESTAMP | StreamType::TIMESTAMP_TAI | StreamType::SFN | StreamType::SLOT |
-    StreamType::CELL_ID | StreamType::N_RX_ANT_SRS | StreamType::N_CELLS |
+    StreamType::CELL_ID | StreamType::N_RX_ANT_SRS | StreamType::N_PRB_UL_BWP | StreamType::N_CELLS |
     // Shared per-UE
     StreamType::RNTI |
     // SRS-only cell-level
@@ -382,7 +400,10 @@ constexpr StreamType SRS_PROVIDABLE_STREAMS =
     StreamType::SRS_FREQ_SHIFT | StreamType::SRS_FREQ_HOPPING |
     StreamType::SRS_RESOURCE_TYPE | StreamType::SRS_T_SRS |
     StreamType::SRS_T_OFFSET | StreamType::SRS_USAGE |
-    StreamType::SRS_N_VALID_PRG | StreamType::SRS_PRG_SIZE;
+    StreamType::SRS_N_VALID_PRG | StreamType::SRS_PRG_SIZE |
+    StreamType::SRS_SEQUENCE_ID | StreamType::SRS_CONFIG_IDX |
+    StreamType::SRS_BANDWIDTH_IDX | StreamType::SRS_GROUP_SEQ_HOPPING |
+    StreamType::SRS_START_PRG | StreamType::SRS_START_VALID_PRG;
 
 // Derived masks for indication gating: prevent a path from firing when the
 // subscription only contains streams exclusive to the *other* path.
@@ -466,6 +487,8 @@ public:
     void notifyDataReady();
     void notifySrsDataReady();
 
+    std::size_t activeSubscriptionCount() const;
+
 private:
     DataLake* dataLake;
 
@@ -516,7 +539,7 @@ private:
         std::chrono::steady_clock::time_point expiry_time;  // time_point::max() = indefinite
     };
     std::unordered_map<uint32_t, E3Subscription> e3_subscriptions;
-    std::mutex e3_subscriptions_mutex;
+    mutable std::mutex e3_subscriptions_mutex;
 
     // Connected dApp managers
     struct DAppConnectionInfo {

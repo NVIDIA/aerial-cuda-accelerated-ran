@@ -384,6 +384,7 @@ public:
         uint32_t                     totNumPayloadBytes;
         uint32_t                     totNumUciSegs;
         uint32_t                     totNumUciPayloadBytes;
+        uint32_t                     dataRxHostCellStride;
 
         // device (GPU) output addresses
         uint32_t* pCbCrcsDevice;

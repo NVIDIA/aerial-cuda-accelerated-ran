@@ -63,6 +63,7 @@ void fillPusch(E3BufferInfo& bi, uint16_t n_cells) {
 		cell.cell_id = c + 1;
 		cell.n_rx_ant = 4;
 		cell.n_rx_ant_srs = 4;
+		cell.n_prb_ul_bwp = kPrb;
 		cell.n_bs_ants = 4;
 		cell.n_ue = 1;
 
@@ -78,6 +79,7 @@ void fillPusch(E3BufferInfo& bi, uint16_t n_cells) {
 		m.start_symbol_index = 0;
 		m.nr_of_symbols = 13;
 		m.n_layers = kLayer;
+		m.ue_grp_idx = c;
 		m.n_subcarriers = kPrb * kSc;
 		m.n_dmrs_estimates = kDmrs;
 		m.h_offset = 0;
@@ -95,6 +97,7 @@ void fillSrs(E3SrsBufferInfo& si, uint16_t n_cells) {
 		E3SrsCellInfo& cell = si.cells[c];
 		cell.cell_id = c + 1;
 		cell.n_rx_ant_srs = kSrsRxAnt;
+		cell.n_prb_ul_bwp = kPrb;
 		cell.srs_cell_start_sym = 1;
 		cell.srs_cell_n_srs_sym = 1;
 		cell.n_srs_ue = 1;

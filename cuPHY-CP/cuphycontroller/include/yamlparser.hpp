@@ -382,6 +382,7 @@ struct cuphydriver_config
     uint16_t e3_pub_port;
     uint16_t e3_sub_port;
     uint8_t datalake_drop_tables;
+    std::string datalake_compression;
     std::vector<uint16_t> gpus_list;
     std::vector<struct nic_config> nics_list;
     uint8_t pusch_workCancelMode;
@@ -530,6 +531,7 @@ public:
     uint16_t get_cuphydriver_e3_pub_port();
     uint16_t get_cuphydriver_e3_sub_port();
     uint8_t get_cuphydriver_datalake_drop_tables();
+    std::string& get_cuphydriver_datalake_compression();
     uint8_t get_cuphydriver_datalake_store_failed_pdu();
     uint8_t get_cuphydriver_datalake_db_write_enable();
     std::vector<std::string>& get_cuphydriver_datalake_data_types();

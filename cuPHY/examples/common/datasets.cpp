@@ -466,6 +466,7 @@ DynApiDataset::DynApiDataset(const std::vector<std::string>& inputFileNameVec, c
         DataOut.pStartOffsetsTbCrc      = bStartOffsetsTbCrc.addr();
         DataOut.pStartOffsetsTbPayload  = bStartOffsetsTbPayload.addr();
         DataOut.pDataRx                 = nullptr;
+        DataOut.dataRxHostCellStride    = 0;
         DataOut.pChannelEsts            = nullptr;
         DataOut.pChannelEstSizes        = nullptr;
         DataOut.pCbCrcs                 = bCbCrcs.addr();
@@ -651,6 +652,7 @@ DynApiDataset::DynApiDataset(const std::vector<std::string>& inputFileNameVec, c
             DataOut.pStartOffsetsTbCrc     = bStartOffsetsTbCrc.addr();
             DataOut.pStartOffsetsTbPayload = bStartOffsetsTbPayload.addr();
             DataOut.pDataRx                = nullptr;
+            DataOut.dataRxHostCellStride   = 0;
             DataOut.pChannelEsts           = nullptr;
             DataOut.pChannelEstSizes       = nullptr;
             DataOut.pCbCrcs                = bCbCrcs.addr();
@@ -762,6 +764,7 @@ void DynApiDataset::ResetPointers()
     puschDynPrm.pDataOut       = &DataOut;
 
     DataOut.pDataRx                = nullptr;
+    DataOut.dataRxHostCellStride   = 0;
     DataOut.pChannelEsts           = nullptr;
     DataOut.pChannelEstSizes       = nullptr;
     DataOut.pCbCrcs                = bCbCrcs.addr();
@@ -5476,6 +5479,7 @@ srsDynApiDataset::srsDynApiDataset(const std::vector<std::string>& inputFileName
     dataOut.pRbSnrBuffOffsets  = rbSnrBuffOffsetVec.data();
     dataOut.pSrsChEstToL2      = chEstToL2Vec.data();
     dataOut.pDataRxSrs         = nullptr;
+    dataOut.dataRxSrsHostCellStride = 0;
 
     // debug parameters:
     dynDbgPrm.enableApiLogging = 0;

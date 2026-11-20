@@ -371,6 +371,7 @@ int main(int argc,char* argv[]) {
     ctx_cfg.e3_pub_port = parser_cfg.get_cuphydriver_e3_pub_port();
     ctx_cfg.e3_sub_port = parser_cfg.get_cuphydriver_e3_sub_port();
     ctx_cfg.datalake_drop_tables = parser_cfg.get_cuphydriver_datalake_drop_tables();
+    ctx_cfg.datalake_compression = parser_cfg.get_cuphydriver_datalake_compression();
     ctx_cfg.use_green_contexts = parser_cfg.get_cuphydriver_use_green_contexts();
     ctx_cfg.use_gc_workqueues  = parser_cfg.get_cuphydriver_use_gc_workqueues();
     ctx_cfg.use_batched_memcpy = parser_cfg.get_cuphydriver_use_batched_memcpy();

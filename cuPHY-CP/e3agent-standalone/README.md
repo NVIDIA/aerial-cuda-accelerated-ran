@@ -41,9 +41,10 @@ All commands run from `cuPHY-CP/e3agent-standalone/`.
 ./restart_e3agent_standalone.sh              # start (reuses the image; builds it the first time)
 ./restart_e3agent_standalone.sh -b           # rebuild after C++ or staged data_lake changes
 ./restart_e3agent_standalone.sh -c my.yaml   # start with a specific config
+./restart_e3agent_standalone.sh -t ~/traces/run1.trace  # replay any host trace
 ```
 
-This starts the `e3agent-standalone` container with shared memory and E3AP ports. `config/` and `data/` are mounted, so config- or trace-only edits require no rebuild. Press Ctrl+C to stop. Edit `config/e3agent-standalone.example.yaml` first (see [Configuration](#configuration)) to pick the mode and settings; for `replay` mode, generate a trace beforehand (see [Data generation](#data-generation)).
+This starts the `e3agent-standalone` container with shared memory and E3AP ports. `config/` and `data/` are mounted, so config- or trace-only edits require no rebuild. Press Ctrl+C to stop. The config file sets the mode and settings, and command line overrides take precedence over it; see [Configuration](#configuration) for every key and flag, or run with `-h`. For `replay` mode, generate a trace beforehand (see [Data generation](#data-generation)).
 
 ### 2. Attach a dApp
 
@@ -58,19 +59,31 @@ The dApp receives indications and runs inference as if connected to a live L1.
 
 ## Configuration
 
-Single file, `config/e3agent-standalone.example.yaml`. `mode` picks the active block; unknown keys are rejected.
+Single file, `config/e3agent-standalone.example.yaml`. `mode` picks the active block (`synth` or `replay`); unknown keys are rejected. Flags go to `restart_e3agent_standalone.sh` and take precedence over the file.
 
-* **agent**: E3AP ZMQ ports `rep_port`/`pub_port`/`sub_port` (REP/PUB/SUB sockets), mirroring cuphycontroller.
-* **rows**: shared memory ring depths per buffer.
-* **cpu.feeder_core**: pins the feeder threads; use an isolated core for jitter free synth, or `-1` for none.
-* **synth**: a built-in generator that needs no database or capture. It ticks a slot clock (`slot_tick_us`) and, on each uplink slot, fills the PUSCH, SRS, and FH buffers with deterministic metrics and simple patterned channel estimates and IQ. `tdd_pattern` sets which slots are uplink, `srs_periodicity_ms` how often SRS appears, `duration_slots` how long to run (`0` = forever), and `n_cells` how many cells each slot carries (`1..40`; each ring must hold at least `n_cells` rows). It also fills `ts_tai`, so the dApp sees the same timing as replay. Useful for exercising the full subscription, indication, and inference path; the IQ itself is not physically meaningful.
-* **replay**: `path`, `loops` (0 loops forever; pacing follows recorded `ts_tai`).
+| Key | Default | Flag | Meaning |
+|---|---|---|---|
+| `mode` | required | `--synth`, `--replay` | Data source |
+| `log_level` | `INF` | `--log-level LVL` | `VRB`, `DBG`, `INF`, `WRN`, `ERR`, or `FAT` |
+| `agent.rep_port`, `pub_port`, `sub_port` | 5555, 5556, 5557 | | E3AP ZMQ ports (REP/PUB/SUB), mirroring cuphycontroller |
+| `rows.fh`, `pusch`, `hest`, `srs_iq`, `srs`, `srs_hest` | 120, 180, 140, 40, 70, 90 | | Shared memory ring depth per buffer |
+| `cpu.feeder_core` | -1 | `--feeder-core N` | Core for the feeder threads; an isolated core keeps slot timing steady, -1 = no pinning |
+| `synth.slot_tick_us` | 500 | | Slot clock |
+| `synth.tdd_pattern` | `DDDSU` | | Uplink slots are `U`; `D` and `S` are skipped |
+| `synth.srs_periodicity_ms` | 40 | | SRS cadence; SRS rides a `U` slot |
+| `synth.duration_slots` | 0 | `--duration-slots N` | Run length; 0 = forever |
+| `synth.n_cells` | 1 | | Cells per slot, 1 to 40; every ring needs at least `n_cells` rows |
+| `replay.path` | required | `-t`, `--trace PATH` | Trace file; the flag takes any host path, mounts it read only, and implies `--replay` |
+| `replay.loops` | 0 | `--loops N` | Passes over the trace; 0 = forever |
+| `replay.wait_for_subscriber` | false | `--wait-subscriber` | Start each pass on the first E3 subscription; restart from the first slot when the last one is released |
+
+Replay paces slots by the recorded `ts_tai` (gaps clamped to 1 s). With `wait_for_subscriber`, an abandoned pass does not count toward `loops`, and a dApp that crashes without releasing keeps its subscription, so the replay keeps running.
 
 ## Data generation
 
 Two sources feed the agent, selected by `mode`; more may be added in future releases.
 
-* **synth**: built-in, needs no data (see the `synth` keys above).
+* **synth**: built-in, needs no database or capture. On each uplink slot it fills the PUSCH, SRS, and FH buffers with deterministic metrics and simple patterned channel estimates and IQ, and it fills `ts_tai`, so the dApp sees the same timing as replay. Useful for exercising the full subscription, indication, and inference path; the IQ itself is not physically meaningful.
 * **replay**: plays back a trace file. We provide `clickhouse_to_trace.py` to export a Data Lake capture to a trace, for example:
 
 ```bash
@@ -84,7 +97,7 @@ Useful flags:
 * `--limit`/`-l`: cap the trace to the first N slot timestamps across the selected PUSCH/SRS streams.
 * `--since`/`--until`: window by wall-clock time, `'YYYY-MM-DD HH:MM:SS'` in the ClickHouse server timezone (typically UTC), e.g. `--since '2026-06-23 14:00:00' --until '2026-06-23 14:05:00'`.
 
-plus the usual ClickHouse connection flags. Then set `mode: replay` and point `replay.path` at the result (`/data` is mounted read only into the container). To write a trace from another source, see [`docs/trace_format.md`](docs/trace_format.md).
+plus the usual ClickHouse connection flags. Then set `mode: replay` and point `replay.path` at the result (`/data` is mounted read only into the container), or pass it with `-t`. To write a trace from another source, see [`docs/trace_format.md`](docs/trace_format.md).
 
 ## Notes
 

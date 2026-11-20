@@ -54,7 +54,7 @@ struct E3UeMetrics {
 	uint8_t nr_of_symbols{};        // per-group
 	uint32_t tb_size{};
 	uint32_t pdu_len{};             // tb_size on CRC pass, 0 on CRC fail
-	uint32_t pdu_offset{};          // byte offset of this UE's PDU in the PUSCH SHM buffer
+	uint32_t pdu_offset{};          // byte offset of this UE's PDU from the start of the PUSCH SHM buffer half
 	uint16_t target_code_rate{};
 	uint8_t new_data_indicator{};
 	uint8_t n_layers{};
@@ -76,6 +76,7 @@ struct E3CellInfo {
 	uint16_t cell_id{};
 	uint16_t n_rx_ant{};
 	uint16_t n_rx_ant_srs{};
+	uint16_t n_prb_ul_bwp{};
 	uint8_t  n_bs_ants{};
 	uint16_t n_ue{};
 
@@ -105,6 +106,7 @@ struct fhInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint16_t> cellId;
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
@@ -112,11 +114,12 @@ struct fhInfo_t {
 	std::vector<uint16_t> slot;
 	std::vector<uint16_t> nRxAnt;
 	std::vector<uint16_t> nRxAntSrs;
+	std::vector<uint16_t> nPrbUlBwp;
 	std::vector<uint16_t> nUes;
 	int16_t* pDataAlloc;
 	std::vector<int16_t*> fhData;
 };
-const uint32_t FH_INFO_MEMBER_COUNT = 9;
+const uint32_t FH_INFO_MEMBER_COUNT = 10;
 
 template<typename F>
 void forEachFhInfoMember(fhInfo_t* info, F&& func) {
@@ -127,6 +130,7 @@ void forEachFhInfoMember(fhInfo_t* info, F&& func) {
 	func(info->slot);
 	func(info->nRxAnt);
 	func(info->nRxAntSrs);
+	func(info->nPrbUlBwp);
 	func(info->nUes);
 }
 
@@ -146,6 +150,7 @@ struct hestInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint16_t> cellId;
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
@@ -176,18 +181,20 @@ struct srsIqInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint16_t> cellId;
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
 	std::vector<uint16_t> sfn;
 	std::vector<uint16_t> slot;
 	std::vector<uint16_t> nRxAntSrs;
+	std::vector<uint16_t> nPrbUlBwp;
 	std::vector<uint16_t> nSrsUes;
 	int16_t* pDataAlloc;
 	std::vector<int16_t*> iqData;
 	size_t writeOffsetBytes{};
 };
-const uint32_t SRS_IQ_INFO_MEMBER_COUNT = 8;
+const uint32_t SRS_IQ_INFO_MEMBER_COUNT = 9;
 
 template<typename F>
 void forEachSrsIqInfoMember(srsIqInfo_t* info, F&& func) {
@@ -197,6 +204,7 @@ void forEachSrsIqInfoMember(srsIqInfo_t* info, F&& func) {
 	func(info->sfn);
 	func(info->slot);
 	func(info->nRxAntSrs);
+	func(info->nPrbUlBwp);
 	func(info->nSrsUes);
 }
 
@@ -209,6 +217,7 @@ struct srsHestInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint16_t> cellId;
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
@@ -241,6 +250,7 @@ struct srsInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint16_t> cellId;
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
@@ -278,6 +288,8 @@ struct srsInfo_t {
 	std::vector<uint8_t> configIdx;
 	std::vector<uint8_t> bandwidthIdx;
 	std::vector<uint8_t> groupOrSequenceHopping;
+	std::vector<uint16_t> srsStartPrg;
+	std::vector<uint16_t> startValidPrg;
 	// Grid dims (decode srs_hest blob via JOIN on sfn+slot+rnti)
 	std::vector<uint16_t> nPrbGrps;
 	std::vector<uint16_t> prbGrpSize;
@@ -329,6 +341,8 @@ void forEachSrsInfoMember(srsInfo_t* info, F&& func) {
 	func(info->configIdx);
 	func(info->bandwidthIdx);
 	func(info->groupOrSequenceHopping);
+	func(info->srsStartPrg);
+	func(info->startValidPrg);
 	func(info->nPrbGrps);
 	func(info->prbGrpSize);
 	func(info->rbSnrSize);
@@ -367,6 +381,12 @@ struct E3SrsUeMetrics {
 	uint32_t usage{};
 	uint16_t n_valid_prg{};
 	uint16_t prg_size{};
+	uint16_t sequence_id{};
+	uint8_t config_idx{};
+	uint8_t bandwidth_idx{};
+	uint8_t group_seq_hopping{};
+	uint16_t start_prg{};
+	uint16_t start_valid_prg{};
 	uint16_t n_prb_grps{};
 	uint32_t srs_hest_offset{};
 	uint32_t srs_hest_size{};
@@ -378,6 +398,7 @@ struct E3SrsUeMetrics {
 struct E3SrsCellInfo {
 	uint16_t cell_id{};
 	uint16_t n_rx_ant_srs{};
+	uint16_t n_prb_ul_bwp{};
 	uint8_t  srs_cell_start_sym{};
 	uint8_t  srs_cell_n_srs_sym{};
 	uint16_t n_srs_ue{};
@@ -461,10 +482,15 @@ inline void srs_rb_snr_advance(srsInfo_t* s, size_t idx, const void* src, uint32
 }
 
 // Per-buffer ring cursor: accumulates rows, ping-pongs at capacity (Data Lake model).
+// bytes is the back-to-back byte cursor of the PUSCH PDU ring; it restarts with the half.
 struct Accum {
 	uint8_t half = 0;
 	uint32_t row = 0;
-	void advance(uint32_t cap) { if (++row >= cap) { half ^= 1; row = 0; } }
+	uint32_t bytes = 0;
+	void flip() { half ^= 1; row = 0; bytes = 0; }
+	void advance(uint32_t cap) { if (++row >= cap) flip(); }
+	void reserve(uint32_t n, uint32_t cap) { if (row + n > cap) flip(); }
+	void placePdu(E3UeMetrics& m) { m.pdu_offset = bytes; bytes += m.pdu_len; ++row; }
 };
 
 #endif // E3_TYPES_HPP

@@ -420,6 +420,7 @@ struct context_config
     uint16_t e3_pub_port;                                       ///< E3 agent publish port number
     uint16_t e3_sub_port;                                       ///< E3 agent subscribe port number
     uint8_t datalake_drop_tables;                               ///< Drop existing datalake tables on startup (0=keep, 1=drop)
+    std::string datalake_compression;                           ///< ClickHouse CODEC for the large array columns (e.g. "NONE", "ZSTD(1)"; empty=server default)
                        
     uint8_t  use_green_contexts;                                ///< Use CUDA green contexts (0=disabled, 1=enabled)
     uint8_t  use_gc_workqueues;                                 ///< Use green contexts' workqueue feature (0=disabled, 1=enabled), if green contexts enabled  

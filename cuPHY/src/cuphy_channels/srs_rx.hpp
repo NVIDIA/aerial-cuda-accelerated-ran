@@ -43,6 +43,9 @@ public:
         // flag to copy outputs to CPU after run
         bool cpuCopyOn;
 
+        // elements between consecutive cells in pDataRxSrsHost
+        uint32_t dataRxSrsHostCellStride;
+
         // device (GPU) output addresses
         cuphySrsReport_t*          d_srsReports;        // array containing SRS reports of all users
         float*                     d_rbSnrBuffer;       // buffer containing RB SNRs of all users
@@ -101,6 +104,7 @@ private:
     // input/intermediate/output buffers
     cuphy::linear_alloc<128, cuphy::device_alloc> m_LinearAlloc;
     cuphyTensorPrm_t*                             m_hPrmDataRx{};
+    std::vector<cuphy::tensor_ref>                m_tRefDataRx;
     OutputParams                                  m_outputPrms{};
     std::vector<void*>                            m_gpuAddrsChEstToL2InnerVec;
     std::vector<void*>                            m_gpuAddrsChEstToL2Vec;

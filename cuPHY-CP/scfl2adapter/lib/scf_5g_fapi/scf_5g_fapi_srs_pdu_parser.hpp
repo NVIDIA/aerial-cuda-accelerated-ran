@@ -802,6 +802,25 @@ void SrsPduParser<V>::finalize_srs_order_prbs(slot_command_api::srs_params& para
     auto& rb_info_per_sym = params.rb_info_per_sym[cell_index_];
     auto& final_rb_info_per_sym = params.final_rb_info_per_sym[cell_index_];
 
+#ifdef SCF_FAPI_10_04_SRS
+    const bool use_full_band_order_prbs = ru_ == SINGLE_SECT_MODE;
+    const uint16_t ul_bandwidth_prbs = use_full_band_order_prbs
+        ? view_->cell_view(cell_index_, slot_ind_).cell_params().nPrbUlBwp
+        : 0u;
+#else
+    const bool use_full_band_order_prbs = false;
+    const uint16_t ul_bandwidth_prbs = 0u;
+#endif
+    if (use_full_band_order_prbs && ul_bandwidth_prbs == 0u)
+    {
+        NVLOGE_FMT(detail::k_tag, AERIAL_L2ADAPTER_EVENT,
+                   "SrsPduParser: UL bandwidth is zero while finalizing "
+                   "single-section SRS order PRBs cell_index={}",
+                   cell_index_);
+        srs_order_prbs_finalized_ = true;
+        return;
+    }
+
     // Phase 1: per symbol, sort the recorded intervals and merge them into final_rb_info_per_sym.
     std::size_t merged_interval_count = 0;
     for (uint16_t sym_idx = 0; sym_idx < OFDM_SYMBOLS_PER_SLOT; ++sym_idx)
@@ -812,9 +831,19 @@ void SrsPduParser<V>::finalize_srs_order_prbs(slot_command_api::srs_params& para
             continue;
         }
 
-        std::ranges::sort(intervals);
         auto& merged = final_rb_info_per_sym[sym_idx];
-        detail::merge_sorted_intervals(intervals, merged);
+        if (use_full_band_order_prbs)
+        {
+            // Single-section packets cover the full UL bandwidth. The recorded
+            // intervals identify which symbols carry SRS.
+            merged.clear();
+            merged.emplace_back(0u, static_cast<uint16_t>(ul_bandwidth_prbs - 1u));
+        }
+        else
+        {
+            std::ranges::sort(intervals);
+            detail::merge_sorted_intervals(intervals, merged);
+        }
         merged_interval_count += merged.size();
     }
 

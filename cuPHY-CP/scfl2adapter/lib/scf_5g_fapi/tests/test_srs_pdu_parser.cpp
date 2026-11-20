@@ -352,6 +352,32 @@ void expect_no_srs_state_mutation(const MockUlModuleView& view)
     }
 }
 
+#ifdef SCF_FAPI_10_04_SRS
+void expect_srs_order_prbs_cover_band(const slot_command_api::slot_info_t& slot_info,
+                                      uint16_t bandwidth,
+                                      uint8_t expected_symbol)
+{
+    ASSERT_LT(expected_symbol, slot_info.symbols.size());
+    const auto& expected_entries =
+        slot_info.symbols[expected_symbol][slot_command_api::channel_type::SRS];
+    ASSERT_EQ(expected_entries.size(), 1u);
+
+    std::size_t count = 0u;
+    for (const auto& per_symbol : slot_info.symbols)
+    {
+        for (const auto index : per_symbol[slot_command_api::channel_type::SRS])
+        {
+            ASSERT_LT(index, slot_info.prbs_size);
+            const auto& prb = slot_info.prbs[index].common;
+            EXPECT_EQ(prb.startPrbc, 0u);
+            EXPECT_EQ(prb.numPrbc, bandwidth);
+            ++count;
+        }
+    }
+    EXPECT_EQ(count, 1u);
+}
+#endif
+
 // Builds an SRS PDU whose payload is wired up for the SCF_FAPI_10_04_SRS
 // accept path. Under that build flag, the parser calls
 // detail::decode_v4_srs_params(pdu) which reads
@@ -521,6 +547,42 @@ TEST(SrsPduParser, Validation_SingleSectModePolicy)
     expect_no_srs_state_mutation(view);
 }
 
+TEST(SrsPduParser, Validation_SingleSectWithPuschPolicy)
+{
+    suppress_fmtlog_output();
+
+    MockUlModuleView view{};
+    view.srs_enabled_ = true;
+    view.ru_ = SINGLE_SECT_MODE;
+    scf_5g_fapi::SrsPduParser<MockUlModuleView> parser{view};
+
+    const auto req = make_ul_tti_req(20u, 8u, 1u, 1u, 1u);
+    parser.setup_cell(req, 0u, nullptr, 1);
+
+#ifdef SCF_FAPI_10_04_SRS
+    scf_fapi_srs_pdu_t pdu{};
+    SrsPduWithPayload pdu_with_payload{};
+    const auto& parsed_pdu = make_valid_srs_pdu_for_parse(pdu, pdu_with_payload);
+    EXPECT_TRUE(parser.parse(req.sfn, req.slot, parsed_pdu));
+    EXPECT_EQ(view.error_indication_calls_, 0u);
+    ASSERT_NE(view.slot_cmd_.cell_groups.srs.get(), nullptr);
+    const auto* order_prbs = view.order_sym_prb_info(0u);
+    ASSERT_NE(order_prbs, nullptr);
+    expect_srs_order_prbs_cover_band(
+        *order_prbs, view.cell_view_.stat_prm_.nPrbUlBwp, parsed_pdu.time_start_position);
+#else
+    EXPECT_TRUE(parser.parse(req.sfn, req.slot, make_valid_srs_pdu()));
+    EXPECT_EQ(view.error_indication_calls_, 0u);
+#ifdef SCF_FAPI_10_04
+    expect_no_srs_state_mutation(view);
+#else
+    // Rel-26-2 still parses legacy 10.02 single-section SRS with PUSCH.
+    ASSERT_NE(view.slot_cmd_.cell_groups.srs.get(), nullptr);
+    EXPECT_EQ(view.slot_cmd_.cell_groups.srs->cell_grp_info.nSrsUes, 1u);
+#endif
+#endif
+}
+
 #ifdef ENABLE_L2_SLT_RSP
 TEST(SrsPduParser, Validation_L1LimitExceededDropsPdu)
 {
@@ -642,6 +704,8 @@ TEST(SrsPduParser, OrderPrbs_PublishedToOrderScratch_DirectCplaneDisabled)
     EXPECT_GT(sym_prbs->prbs_size, 0u);
     EXPECT_GT(srs_order_prb_entry_count(*sym_prbs), 0u);
     EXPECT_EQ(sym_prbs->prbs[0].common.direction, slot_command_api::FH_DIR_UL);
+    EXPECT_EQ(sym_prbs->prbs[0].common.numPrbc,
+              slot_command_api::srs_bw_table[0].bsrs_info[0].mSRS);
 
     // Order metadata never lands on the cell command's own FH buffer.
     auto* cell_fh = view.cell_sub_cmd_.sym_prb_info();

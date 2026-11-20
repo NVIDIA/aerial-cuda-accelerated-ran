@@ -30,6 +30,7 @@
 #include <time.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -70,6 +71,18 @@ void pinThread(int core) {
 	}
 }
 
+// Returns false if stopped before any dApp subscribed.
+bool waitForSubscriber(E3Agent& agent, const std::atomic<bool>& stop) {
+	if (agent.activeSubscriptionCount() > 0) return true;
+	e3shim::log(e3shim::INF, "INF", 0, "replay: waiting for an E3 subscription");
+	const timespec poll{0, 20000000};
+	while (!stop.load(std::memory_order_relaxed)) {
+		if (agent.activeSubscriptionCount() > 0) return true;
+		nanosleep(&poll, nullptr);
+	}
+	return false;
+}
+
 void addNs(timespec& t, uint64_t ns) {
 	const uint64_t nsec = uint64_t(t.tv_nsec) + ns;
 	t.tv_sec += time_t(nsec / 1000000000ull);
@@ -80,10 +93,10 @@ void addNs(timespec& t, uint64_t ns) {
 struct Cursor {
 	const uint8_t* p;
 	const uint8_t* end;
-	template<class T> bool get(T& v) {
-		if (size_t(end - p) < sizeof(T)) return false;
-		std::memcpy(&v, p, sizeof(T));
-		p += sizeof(T);
+	template<class T> bool get(T& v, size_t n = sizeof(T)) {
+		if (size_t(end - p) < n) return false;
+		std::memcpy(&v, p, n);
+		p += n;
 		return true;
 	}
 	const uint8_t* take(uint32_t n) {
@@ -98,8 +111,9 @@ struct PuschRings { Accum fh, pusch, hest; };
 struct SrsRings   { Accum iq, hest, rb; };
 
 // A slot assembled from cells sharing one ts_tai; hdr_n_cells is advisory.
-struct PendingPusch { E3BufferInfo bi; bool active = false; uint16_t hdr_n_cells = 0; };
-struct PendingSrs   { E3SrsBufferInfo si; bool active = false; uint16_t hdr_n_cells = 0; };
+// *_row is the slot's first row in a ring whose rows all cells of the slot share.
+struct PendingPusch { E3BufferInfo bi; bool active = false; uint16_t hdr_n_cells = 0; uint32_t pusch_row = 0; };
+struct PendingSrs   { E3SrsBufferInfo si; bool active = false; uint16_t hdr_n_cells = 0; uint32_t hest_row = 0, rb_row = 0; };
 
 // Sequential reader over the trace: validates the file header once, then
 // yields one (tag + body) per next(). Returns false at clean EOF or truncation.
@@ -118,10 +132,14 @@ public:
 			return false;
 		}
 		const uint32_t cv = h.version, sv = h.shm_layout_version;  // copy out of packed struct for fmt
-		if (cv != rt::VERSION) {
-			e3shim::log(e3shim::WRN, "WRN", 0,
-				fmt::format("replay: trace version 0x{:06X} != expected 0x{:06X}", cv, rt::VERSION));
+		if (cv != rt::VERSION && cv != rt::VERSION_1_1) {
+			e3shim::log(e3shim::ERR, "ERR", 0,
+				fmt::format("replay: trace version 0x{:06X} unsupported, expected 0x{:06X} or 0x{:06X}",
+					cv, rt::VERSION, rt::VERSION_1_1));
+			close();
+			return false;
 		}
+		v1_1_ = cv == rt::VERSION_1_1;
 		if (sv != e3::SHM_LAYOUT_VERSION) {
 			e3shim::log(e3shim::WRN, "WRN", 0,
 				fmt::format("replay: SHM layout 0x{:06X} != expected 0x{:06X}",
@@ -145,32 +163,41 @@ public:
 		return true;
 	}
 	void close() { if (f_) { std::fclose(f_); f_ = nullptr; } }
+	bool v1_1() const { return v1_1_; }
 	~TraceReader() { close(); }
 private:
 	FILE* f_ = nullptr;
+	bool v1_1_ = false;
 };
 
-// A slot with more cells than the shallowest per-cell ring would wrap and clobber
-// earlier cells still pending; fail fast so rows.* is sized to max cells-per-slot.
-bool ringOverflow(size_t have, uint32_t cap, const char* kind, std::atomic<bool>& stop) {
-	if (have < cap) return false;
+// A slot needing more rows than the shallowest ring would wrap and clobber earlier
+// cells still pending; fail fast so rows.* is sized to the capture's max rows per
+// slot (cells for per-cell rings, UEs for the PUSCH, SRS H-est and RbSNR rings).
+bool ringOverflow(size_t need, uint32_t cap, const char* kind, std::atomic<bool>& stop) {
+	if (need <= cap) return false;
 	e3shim::log(e3shim::ERR, "ERR", 0, fmt::format(
 		"replay: {} slot exceeds ring depth {}; increase rows.* to the capture's "
-		"max cells-per-slot", kind, cap));
+		"max rows per slot", kind, cap));
 	stop.store(true);
 	return true;
 }
 
 // Parse one PUSCH record, stage its blobs in SHM, and append its cell to the slot.
 bool accumulatePusch(DataLake& dl, const RowsCfg& rows, PuschRings& r,
-                     PendingPusch& pend, const uint8_t* body, size_t len, std::atomic<bool>& stop) {
+                     PendingPusch& pend, const uint8_t* body, size_t len, bool v1_1, std::atomic<bool>& stop) {
 	Cursor c{body, body + len};
 	rt::PuschSlotHeader hdr{};
-	if (!c.get(hdr)) return false;
+	if (!c.get(hdr, v1_1 ? offsetof(rt::PuschSlotHeader, n_prb_ul_bwp) : sizeof(hdr))) return false;
+	if (v1_1) hdr.n_prb_ul_bwp = rt::V1_1_N_PRB_UL_BWP;
 	std::vector<rt::PuschUeMetrics> ue(hdr.n_ue);
 	for (auto& u : ue) if (!c.get(u)) return false;
-	if (pend.active && ringOverflow(pend.bi.cells.size(), std::min({rows.fh, rows.pusch, rows.hest}), "PUSCH", stop))
-		return false;
+	if (pend.active) {
+		size_t ue_rows = hdr.n_ue;
+		for (const auto& cl : pend.bi.cells) ue_rows += cl.ues.size();
+		if (ringOverflow(pend.bi.cells.size() + 1, std::min(rows.fh, rows.hest), "PUSCH", stop)
+		    || ringOverflow(ue_rows, rows.pusch, "PUSCH", stop))
+			return false;
+	}
 	rt::BlobHeader hb{}, fb{};
 	if (!c.get(fb)) return false;
 	const uint8_t* fd = c.take(fb.len);
@@ -180,10 +207,10 @@ bool accumulatePusch(DataLake& dl, const RowsCfg& rows, PuschRings& r,
 	if (hb.len && !hd) return false;
 
 	const uint32_t helems = hb.len / sizeof(hestDataType);
-	if (helems > e3::shm::maxHestSamplesPerRow) {
+	if (helems > e3::shm::maxHestSamplesPerRow || hdr.n_ue > rows.pusch) {
 		const uint16_t sfn = hdr.sfn, slot = hdr.slot;  // copy out of packed struct for fmt
 		e3shim::log(e3shim::WRN, "WRN", 0,
-			fmt::format("replay: PUSCH sfn={} slot={} H-est row exceeds cap; skipped", sfn, slot));
+			fmt::format("replay: PUSCH sfn={} slot={} row exceeds cap; skipped", sfn, slot));
 		return false;
 	}
 
@@ -206,6 +233,11 @@ bool accumulatePusch(DataLake& dl, const RowsCfg& rows, PuschRings& r,
 	if (hd && hb.len) std::memcpy(hi.hestData[r.hest.row], hd, hb.len);
 	hi.writeOffsetBytes += hb.len;
 
+	// PUSCH rows count UE records; a cell whose UEs do not fit starts the next half.
+	const uint8_t pusch_half = r.pusch.half;
+	r.pusch.reserve(hdr.n_ue, rows.pusch);
+	if (!pend.active || r.pusch.half != pusch_half) pend.pusch_row = r.pusch.row;
+
 	if (!pend.active) {  // first cell fixes the slot-level fields
 		pend.bi = {};
 		pend.bi.sfn = hdr.sfn;
@@ -219,12 +251,13 @@ bool accumulatePusch(DataLake& dl, const RowsCfg& rows, PuschRings& r,
 	pend.bi.cells.emplace_back();
 	E3CellInfo& cell = pend.bi.cells.back();
 	cell.current_fh_buffer = r.fh.half;       cell.fh_write_index = r.fh.row;
-	cell.current_pusch_buffer = r.pusch.half; cell.pusch_write_index = r.pusch.row;
+	cell.current_pusch_buffer = r.pusch.half; cell.pusch_write_index = pend.pusch_row;
 	cell.current_hest_buffer = r.hest.half;   cell.hest_write_index = r.hest.row;
 	cell.hest_row_byte_offset = rowbase;
 	cell.cell_id = hdr.cell_id;
 	cell.n_rx_ant = hdr.n_rx_ant;
 	cell.n_rx_ant_srs = hdr.n_rx_ant_srs;
+	cell.n_prb_ul_bwp = hdr.n_prb_ul_bwp;
 	cell.n_bs_ants = hdr.n_bs_ants;
 	cell.n_ue = hdr.n_ue;
 	cell.ues.resize(hdr.n_ue);
@@ -243,10 +276,10 @@ bool accumulatePusch(DataLake& dl, const RowsCfg& rows, PuschRings& r,
 		m.n_dmrs_estimates = s.n_dmrs_estimates; m.dmrs_symb_pos = s.dmrs_symb_pos;
 		m.timing_advance = s.timing_advance; m.cfo_hz = s.cfo_hz;
 		m.harq_process_id = s.harq_process_id; m.rv_index = s.rv_index;
+		r.pusch.placePdu(m);
 	}
 
 	r.fh.advance(rows.fh);
-	r.pusch.advance(rows.pusch);
 	r.hest.advance(rows.hest);
 	return true;
 }
@@ -270,14 +303,20 @@ void publishPusch(DataLake& dl, E3Agent& agent, PendingPusch& pend, bool& warn) 
 
 // Parse one SRS record, stage its blobs in SHM, and append its cell to the slot.
 bool accumulateSrs(DataLake& dl, const RowsCfg& rows, SrsRings& r,
-                   PendingSrs& pend, const uint8_t* body, size_t len, std::atomic<bool>& stop) {
+                   PendingSrs& pend, const uint8_t* body, size_t len, bool v1_1, std::atomic<bool>& stop) {
 	Cursor c{body, body + len};
 	rt::SrsSlotHeader hdr{};
 	if (!c.get(hdr)) return false;
+	if (v1_1) hdr.n_prb_ul_bwp = rt::V1_1_N_PRB_UL_BWP;
 	std::vector<rt::SrsUeMetrics> ue(hdr.n_srs_ue);
-	for (auto& u : ue) if (!c.get(u)) return false;
-	if (pend.active && ringOverflow(pend.si.cells.size(), std::min({rows.srs_iq, rows.srs_hest, rows.srs}), "SRS", stop))
-		return false;
+	for (auto& u : ue) if (!c.get(u, v1_1 ? offsetof(rt::SrsUeMetrics, sequence_id) : sizeof(u))) return false;
+	if (pend.active) {
+		size_t ue_rows = hdr.n_srs_ue;
+		for (const auto& cl : pend.si.cells) ue_rows += cl.ues.size();
+		if (ringOverflow(pend.si.cells.size() + 1, rows.srs_iq, "SRS", stop)
+		    || ringOverflow(ue_rows, std::min(rows.srs_hest, rows.srs), "SRS", stop))
+			return false;
+	}
 
 	rt::BlobHeader iqb{};
 	if (!c.get(iqb)) return false;
@@ -287,7 +326,7 @@ bool accumulateSrs(DataLake& dl, const RowsCfg& rows, SrsRings& r,
 	// Per-UE (hest, rb_snr) blob pairs in UE order.
 	struct UeBlob { rt::BlobHeader hb, rb; const uint8_t* hd; const uint8_t* rd; };
 	std::vector<UeBlob> ub(hdr.n_srs_ue);
-	size_t hsum = 0, rsum = 0;
+	uint32_t hmax = 0, rmax = 0;
 	for (auto& b : ub) {
 		if (!c.get(b.hb)) return false;
 		b.hd = c.take(b.hb.len);
@@ -295,11 +334,12 @@ bool accumulateSrs(DataLake& dl, const RowsCfg& rows, SrsRings& r,
 		if (!c.get(b.rb)) return false;
 		b.rd = c.take(b.rb.len);
 		if (b.rb.len && !b.rd) return false;
-		hsum += b.hb.len;
-		rsum += b.rb.len;
+		hmax = std::max(hmax, b.hb.len);
+		rmax = std::max(rmax, b.rb.len);
 	}
 	if (iqb.len > size_t(e3::shm::maxSrsIqSamplesPerRow) * sizeof(int16_t)
-	    || hsum > e3::shm::maxSrsHestBytesPerRow || rsum > e3::shm::maxSrsRbSnrBytesPerRow) {
+	    || hmax > e3::shm::maxSrsHestBytesPerRow || rmax > e3::shm::maxSrsRbSnrBytesPerRow
+	    || hdr.n_srs_ue > std::min(rows.srs_hest, rows.srs)) {
 		const uint16_t sfn = hdr.sfn, slot = hdr.slot;  // copy out of packed struct for fmt
 		e3shim::log(e3shim::WRN, "WRN", 0,
 			fmt::format("replay: SRS sfn={} slot={} row exceeds cap; skipped", sfn, slot));
@@ -312,7 +352,13 @@ bool accumulateSrs(DataLake& dl, const RowsCfg& rows, SrsRings& r,
 	const uint32_t iq_off = qi.writeOffsetBytes;
 	srs_iq_advance(&qi, r.iq.row, iqd, iqb.len);
 
-	// H-est + RbSNR: per-UE blobs concatenated into one row; capture byte offsets.
+	// H-est + RbSNR: one row per UE, as in the live Data Lake. A cell's UE rows
+	// must share one buffer half, so switch halves first if they do not fit.
+	const uint8_t hest_half = r.hest.half, rb_half = r.rb.half;
+	r.hest.reserve(hdr.n_srs_ue, rows.srs_hest);
+	r.rb.reserve(hdr.n_srs_ue, rows.srs);
+	if (!pend.active || r.hest.half != hest_half) pend.hest_row = r.hest.row;
+	if (!pend.active || r.rb.half != rb_half) pend.rb_row = r.rb.row;
 	srsHestInfo_t& shi = dl.srsHestInfo[r.hest.half];
 	if (r.hest.row == 0) shi.writeOffsetBytes = 0;
 	srsInfo_t& ri = dl.srsInfo[r.rb.half];
@@ -320,9 +366,9 @@ bool accumulateSrs(DataLake& dl, const RowsCfg& rows, SrsRings& r,
 	std::vector<uint32_t> hest_off(hdr.n_srs_ue), rb_off(hdr.n_srs_ue);
 	for (uint16_t i = 0; i < hdr.n_srs_ue; ++i) {
 		hest_off[i] = shi.writeOffsetBytes;
-		srs_hest_advance(&shi, r.hest.row, ub[i].hd, ub[i].hb.len);
+		srs_hest_advance(&shi, r.hest.row++, ub[i].hd, ub[i].hb.len);
 		rb_off[i] = ri.writeOffsetBytes;
-		srs_rb_snr_advance(&ri, r.rb.row, ub[i].rd, ub[i].rb.len);
+		srs_rb_snr_advance(&ri, r.rb.row++, ub[i].rd, ub[i].rb.len);
 	}
 
 	if (!pend.active) {  // first cell fixes the slot-level fields
@@ -337,12 +383,13 @@ bool accumulateSrs(DataLake& dl, const RowsCfg& rows, SrsRings& r,
 
 	pend.si.cells.emplace_back();
 	E3SrsCellInfo& cell = pend.si.cells.back();
-	cell.current_srs_iq_buffer = r.iq.half;       cell.srs_iq_write_index = r.iq.row + 1;
-	cell.current_srs_hest_buffer = r.hest.half;   cell.srs_hest_write_index = r.hest.row + 1;
-	cell.current_srs_rb_snr_buffer = r.rb.half;   cell.srs_rb_snr_write_index = r.rb.row + 1;
+	cell.current_srs_iq_buffer = r.iq.half;       cell.srs_iq_write_index = r.iq.row;
+	cell.current_srs_hest_buffer = r.hest.half;   cell.srs_hest_write_index = pend.hest_row;
+	cell.current_srs_rb_snr_buffer = r.rb.half;   cell.srs_rb_snr_write_index = pend.rb_row;
 	cell.srs_iq_row_byte_offset = iq_off;
 	cell.cell_id = hdr.cell_id;
 	cell.n_rx_ant_srs = hdr.n_rx_ant_srs;
+	cell.n_prb_ul_bwp = hdr.n_prb_ul_bwp;
 	cell.srs_cell_start_sym = hdr.srs_cell_start_sym;
 	cell.srs_cell_n_srs_sym = hdr.srs_cell_n_srs_sym;
 	cell.n_srs_ue = hdr.n_srs_ue;
@@ -360,13 +407,13 @@ bool accumulateSrs(DataLake& dl, const RowsCfg& rows, SrsRings& r,
 		m.resource_type = s.resource_type; m.t_srs = s.t_srs; m.t_offset = s.t_offset;
 		m.usage = s.usage; m.n_valid_prg = s.n_valid_prg; m.prg_size = s.prg_size;
 		m.n_prb_grps = s.n_prb_grps;
+		m.sequence_id = s.sequence_id; m.config_idx = s.config_idx; m.bandwidth_idx = s.bandwidth_idx;
+		m.group_seq_hopping = s.group_seq_hopping; m.start_prg = s.start_prg; m.start_valid_prg = s.start_valid_prg;
 		m.srs_hest_offset = hest_off[i];   m.srs_hest_size = ub[i].hb.len;
 		m.srs_rb_snr_offset = rb_off[i];   m.srs_rb_snr_size = ub[i].rb.len;
 	}
 
 	r.iq.advance(rows.srs_iq);
-	r.hest.advance(rows.srs_hest);
-	r.rb.advance(rows.srs);
 	return true;
 }
 
@@ -398,17 +445,22 @@ bool Replay::run(std::atomic<bool>& stop) {
 	// Rings persist across loops, mirroring a continuous live stream
 	PuschRings pr;
 	SrsRings sr;
-	for (uint64_t pass = 0; (cfg_.loops == 0 || pass < cfg_.loops) && !stop.load(); ++pass) {
+	for (uint64_t pass = 0; (cfg_.loops == 0 || pass < cfg_.loops) && !stop.load();) {
+		if (cfg_.wait_for_subscriber && !waitForSubscriber(agent_, stop)) break;
 		TraceReader rd;
 		if (!rd.open(cfg_.path)) {
 			e3shim::log(e3shim::ERR, "ERR", 0, fmt::format("replay: invalid or unreadable trace {}", cfg_.path));
 			return false;
 		}
+		if (pass == 0 && rd.v1_1()) {
+			e3shim::log(e3shim::WRN, "WRN", 0,
+				"replay: v1.1.0 trace has no n_prb_ul_bwp, assuming 273 PRB (correct only for 100 MHz captures; recapture narrower carriers as v1.2.0)");
+		}
 
 		timespec next;
 		clock_gettime(CLOCK_MONOTONIC, &next);
 		uint64_t last_tai = 0, emitted = 0;
-		bool have_last = false, warn_pusch = true, warn_srs = true;
+		bool have_last = false, warn_pusch = true, warn_srs = true, abandoned = false;
 		PendingPusch pp;
 		PendingSrs sp;
 
@@ -424,6 +476,10 @@ bool Replay::run(std::atomic<bool>& stop) {
 			if (have_last && tai != last_tai) {
 				if (pp.active) { publishPusch(dl_, agent_, pp, warn_pusch); ++emitted; }
 				if (sp.active) { publishSrs(dl_, agent_, sp, warn_srs); ++emitted; }
+				if (cfg_.wait_for_subscriber && agent_.activeSubscriptionCount() == 0) {
+					abandoned = true;
+					break;
+				}
 			}
 			if (have_last) {
 				int64_t d = int64_t(tai - last_tai);
@@ -435,18 +491,26 @@ bool Replay::run(std::atomic<bool>& stop) {
 			last_tai = tai;
 			clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, nullptr);
 
-			if (tag == rt::TAG_PUSCH) accumulatePusch(dl_, rows_, pr, pp, buf.data(), buf.size(), stop);
-			else if (tag == rt::TAG_SRS) accumulateSrs(dl_, rows_, sr, sp, buf.data(), buf.size(), stop);
+			if (tag == rt::TAG_PUSCH) accumulatePusch(dl_, rows_, pr, pp, buf.data(), buf.size(), rd.v1_1(), stop);
+			else if (tag == rt::TAG_SRS) accumulateSrs(dl_, rows_, sr, sp, buf.data(), buf.size(), rd.v1_1(), stop);
 		}
+		if (cfg_.wait_for_subscriber && !stop.load(std::memory_order_relaxed) && agent_.activeSubscriptionCount() == 0)
+			abandoned = true;
 		// Flush the trailing slot (EOF or end of this pass). On stop, skip the partial.
-		if (!stop.load(std::memory_order_relaxed)) {
+		if (!stop.load(std::memory_order_relaxed) && !abandoned) {
 			if (pp.active) { publishPusch(dl_, agent_, pp, warn_pusch); ++emitted; }
 			if (sp.active) { publishSrs(dl_, agent_, sp, warn_srs); ++emitted; }
 		}
 		rd.close();
+		if (abandoned) {
+			e3shim::log(e3shim::INF, "INF", 0,
+				fmt::format("replay: last subscription released after {} slots; pass {} restarts on the next one", emitted, pass));
+			continue;
+		}
 		e3shim::log(e3shim::INF, "INF", 0,
 			fmt::format("replay: pass {} emitted {} slots", pass, emitted));
 		if (emitted == 0) return true;  // empty/garbage trace: don't spin forever
+		++pass;
 	}
 	return true;
 }

@@ -42,7 +42,7 @@ import clickhouse_connect
 
 # --- replay_format.hpp mirror (packed, little-endian) -----------------------
 MAGIC = struct.unpack('<I', b'E3RT')[0]
-VERSION = 0x010100
+VERSION = 0x010200
 SHM_LAYOUT_VERSION = 0x010100
 TAG_PUSCH, TAG_SRS = 1, 2
 
@@ -56,11 +56,11 @@ FILE_HDR = struct.Struct('<IIII')          # magic, version, shm_layout, reserve
 REC_HDR = struct.Struct('<HHI')            # tag, reserved, payload_len
 BLOB_HDR = struct.Struct('<I')             # len
 
-PUSCH_SLOT = struct.Struct('<QQHHHHHHBBH')
+PUSCH_SLOT = struct.Struct('<QQHHHHHHBBHH')
 PUSCH_UE = struct.Struct('<HBIfffHfBBBHHBBIIHBBHHIIHBHffBB')
 SRS_SLOT = struct.Struct('<QQHHHHHBBHH')
-SRS_UE = struct.Struct('<HffffBfffBBBBBBBBHBBHHIHHHII')
-assert (PUSCH_SLOT.size, PUSCH_UE.size, SRS_SLOT.size, SRS_UE.size) == (32, 73, 32, 65)
+SRS_UE = struct.Struct('<HffffBfffBBBBBBBBHBBHHIHHHIIHBBBHH')
+assert (PUSCH_SLOT.size, PUSCH_UE.size, SRS_SLOT.size, SRS_UE.size) == (34, 73, 32, 74)
 
 
 def blob(b: bytes) -> bytes:
@@ -123,7 +123,8 @@ def rows(client: Any, sql: str) -> tuple[list, list]:
 def pack_pusch(slot: dict, ue_rows: list, hest: bytes, fh: bytes) -> bytes:
     hdr = PUSCH_SLOT.pack(
         slot['sw'], slot['tai'], slot['SFN'], slot['Slot'], slot['CellId'],
-        slot['nRxAnt'], slot['nRxAntSrs'], slot['nCells'], slot['nBsAnts'], 0, len(ue_rows))
+        slot['nRxAnt'], slot['nRxAntSrs'], slot['nCells'], slot['nBsAnts'], 0, len(ue_rows),
+        slot['nPrbUlBwp'])
     has_hest = bool(hest)  # no hest bytes => zero the per-UE indices so consumers read nothing
     body = [hdr]
     for u in ue_rows:
@@ -144,7 +145,8 @@ def pack_pusch(slot: dict, ue_rows: list, hest: bytes, fh: bytes) -> bytes:
 def pack_srs(slot: dict, ue_rows: list, iq: bytes, ue_blobs: list) -> bytes:
     hdr = SRS_SLOT.pack(
         slot['sw'], slot['tai'], slot['SFN'], slot['Slot'], slot['CellId'], slot['nCells'],
-        slot['nRxAntSrs'], slot['srsCellStartSym'], slot['srsCellNSrsSym'], len(ue_rows), 0)
+        slot['nRxAntSrs'], slot['srsCellStartSym'], slot['srsCellNSrsSym'], len(ue_rows),
+        slot['nPrbUlBwp'])
     body = [hdr]
     for u, (hb, rb) in zip(ue_rows, ue_blobs):
         body.append(SRS_UE.pack(
@@ -153,7 +155,8 @@ def pack_srs(slot: dict, ue_rows: list, iq: bytes, ue_blobs: list) -> bytes:
             u['nSyms'], u['nRepetitions'], u['combSize'], u['combOffset'], u['startSym'],
             u['cyclicShift'], u['frequencyPosition'], u['frequencyShift'], u['frequencyHopping'],
             u['resourceType'], u['tSrs'], u['tOffset'], u['usage'], u['nValidPrg'], u['prgSize'],
-            u['nPrbGrps'], len(hb), len(rb)))
+            u['nPrbGrps'], len(hb), len(rb), u['sequenceId'], u['configIdx'], u['bandwidthIdx'],
+            u['groupOrSequenceHopping'], u['srsStartPrg'], u['startValidPrg']))
     body.append(blob(iq))
     for hb, rb in ue_blobs:
         body.append(blob(hb))
@@ -200,7 +203,8 @@ def load_srs(client: Any, where: str, cellmap: dict) -> dict:
             "signalEnergy, noiseEnergy, toaUs, hdAntFlag, scCorrRe, scCorrIm, csCorrRatioDb, "
             "nAntPorts, nSyms, nRepetitions, combSize, combOffset, startSym, cyclicShift, "
             "frequencyPosition, frequencyShift, frequencyHopping, resourceType, tSrs, tOffset, "
-            "usage, nValidPrg, prgSize, nPrbGrps, rbSnrData")
+            "usage, nValidPrg, prgSize, nPrbGrps, rbSnrData, sequenceId, configIdx, bandwidthIdx, "
+            "groupOrSequenceHopping, srsStartPrg, startValidPrg")
     names, data = rows(client, f"SELECT {cols} FROM srs {where} ORDER BY tai, CellId, rnti")
     idx = {n: i for i, n in enumerate(names)}
     slots = {}
@@ -213,7 +217,8 @@ def load_srs(client: Any, where: str, cellmap: dict) -> dict:
                 'CellId': r[idx['CellId']], 'nCells': r[idx['nCells']],
                 'srsCellStartSym': r[idx['srsCellStartSym']],
                 'srsCellNSrsSym': r[idx['srsCellNSrsSym']],
-                'nRxAntSrs': cellmap.get(r[idx['CellId']], (0, 0))[1], 'ue': []}
+                'nRxAntSrs': cellmap.get(r[idx['CellId']], (0, 0, 0))[1],
+                'nPrbUlBwp': cellmap.get(r[idx['CellId']], (0, 0, 0))[2], 'ue': []}
         u = {n: r[idx[n]] for n in names}
         u['_rb'] = to_bytes(r[idx['rbSnrData']], np.float32)
         s['ue'].append(u)
@@ -301,25 +306,29 @@ def main() -> int:
             return 1
         where = build_where(f"toUnixTimestamp64Nano(TsTaiNs) <= {cut[-1][0]}")
 
-    # nRxAnt/nRxAntSrs are static per cell; two values means the window spans runs.
-    def set_ant(cid: int, i: int, v: int) -> None:
-        e = cellmap.setdefault(cid, [0, 0])
+    # Cell parameters are static per cell; two values means the window spans runs.
+    cell_cols = ('nRxAnt', 'nRxAntSrs', 'nPrbUlBwp')
+
+    def set_cell(cid: int, i: int, v: int) -> None:
+        e = cellmap.setdefault(cid, [0, 0, 0])
         if e[i] and e[i] != v:
-            sys.exit(f"cell {cid}: conflicting nRxAnt{'Srs' if i else ''} ({e[i]} vs {v}); "
+            sys.exit(f"cell {cid}: conflicting {cell_cols[i]} ({e[i]} vs {v}); "
                      "window spans multiple runs, narrow --since/--until or --cells")
         e[i] = v
 
     cellmap: dict = {}
-    for cid, nrx, nrxs in rows(client, f"SELECT DISTINCT CellId, nRxAnt, nRxAntSrs FROM fh {where}")[1]:
-        set_ant(cid, 0, nrx)
-        set_ant(cid, 1, nrxs)
+    for cid, *vals in rows(client, f"SELECT DISTINCT CellId, {', '.join(cell_cols)} FROM fh {where}")[1]:
+        for i, v in enumerate(vals):
+            set_cell(cid, i, v)
     if 'srs' in sel:                                       # SRS-only windows have no fh rows
-        for cid, n in rows(client, f"SELECT DISTINCT CellId, nRxAntSrs FROM srs_iq {where}")[1]:
-            set_ant(cid, 1, n)
+        for cid, nrxs, nprb in rows(client, "SELECT DISTINCT CellId, nRxAntSrs, nPrbUlBwp "
+                                            f"FROM srs_iq {where}")[1]:
+            set_cell(cid, 1, nrxs)
+            set_cell(cid, 2, nprb)
 
     pusch = load_pusch(client, where) if 'pusch' in sel else {}
     for s in pusch.values():
-        s['nRxAnt'], s['nRxAntSrs'] = cellmap.get(s['CellId'], (0, 0))
+        s['nRxAnt'], s['nRxAntSrs'], s['nPrbUlBwp'] = cellmap.get(s['CellId'], (0, 0, 0))
     srs = load_srs(client, where, cellmap) if 'srs' in sel else {}
 
     # Group per-cell records by timestamp; within a slot cells ascend by CellId

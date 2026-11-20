@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstring>
+#include <cmath>
 
 // Constructor
 E3Agent::E3Agent(
@@ -300,6 +301,18 @@ bool E3Agent::createSharedMemoryBuffers(
 }
 
 
+// JSON has no NaN/Inf, so an uncomputable measurement goes on the wire as null.
+[[nodiscard]] inline json finiteOrNull(const float v)
+{
+    return std::isfinite(v) ? json(v) : json();
+}
+
+std::size_t E3Agent::activeSubscriptionCount() const
+{
+    std::lock_guard<std::mutex> lock(e3_subscriptions_mutex);
+    return e3_subscriptions.size();
+}
+
 // Notify subscribers that PUSCH data is ready
 // Flow: gate → periodicity → bit-walks (cell + per-UE) → empty check → send → update timestamp.
 void E3Agent::notifyDataReady()
@@ -416,6 +429,9 @@ void E3Agent::notifyDataReady()
                     case e3::StreamType::N_RX_ANT_SRS:
                         cell_obj["n_rx_ant_srs"] = cell.n_rx_ant_srs;
                         break;
+                    case e3::StreamType::N_PRB_UL_BWP:
+                        cell_obj["n_prb_ul_bwp"] = cell.n_prb_ul_bwp;
+                        break;
                     case e3::StreamType::N_BS_ANTS:
                         cell_obj["n_bs_ants"] = cell.n_bs_ants;
                         break;
@@ -446,16 +462,16 @@ void E3Agent::notifyDataReady()
                                 ue_obj["cb_errors"] = ue.cb_errors;
                                 break;
                             case e3::StreamType::RSRP:
-                                ue_obj["rsrp"] = ue.rsrp;
+                                ue_obj["rsrp"] = finiteOrNull(ue.rsrp);
                                 break;
                             case e3::StreamType::NOISE_VAR:
-                                ue_obj["noise_var"] = ue.noise_var;
+                                ue_obj["noise_var"] = finiteOrNull(ue.noise_var);
                                 break;
                             case e3::StreamType::CB_COUNT:
                                 ue_obj["cb_count"] = ue.cb_count;
                                 break;
                             case e3::StreamType::RSSI:
-                                ue_obj["rssi"] = ue.rssi;
+                                ue_obj["rssi"] = finiteOrNull(ue.rssi);
                                 break;
                             case e3::StreamType::QAM_MOD_ORDER:
                                 ue_obj["qam_mod_order"] = ue.qam_mod_order;
@@ -518,10 +534,10 @@ void E3Agent::notifyDataReady()
                                 ue_obj["dmrs_symb_pos"] = ue.dmrs_symb_pos;
                                 break;
                             case e3::StreamType::SINR:
-                                ue_obj["sinr"] = ue.sinr;
+                                ue_obj["sinr"] = finiteOrNull(ue.sinr);
                                 break;
                             case e3::StreamType::TIMING_ADVANCE:
-                                ue_obj["timing_advance"] = ue.timing_advance;
+                                ue_obj["timing_advance"] = finiteOrNull(ue.timing_advance);
                                 break;
                             case e3::StreamType::HARQ_PROCESS_ID:
                                 ue_obj["harq_process_id"] = ue.harq_process_id;
@@ -530,7 +546,7 @@ void E3Agent::notifyDataReady()
                                 ue_obj["rv_index"] = ue.rv_index;
                                 break;
                             case e3::StreamType::CFO_HZ:
-                                ue_obj["cfo_hz"] = ue.cfo_hz;
+                                ue_obj["cfo_hz"] = finiteOrNull(ue.cfo_hz);
                                 break;
                             default:
                                 break;
@@ -557,7 +573,7 @@ void E3Agent::notifyDataReady()
         if (protocolData.empty()) {
             continue;
         }
-        notif_json["protocolData"] = protocolData;
+        notif_json["protocolData"] = std::move(protocolData);
 
         try {
             NVLOGD_FMT(TAG_E3, "TIMESTAMP_LOG: Before PUSCH ZMQ send at {}", std::chrono::high_resolution_clock::now().time_since_epoch().count());
@@ -663,6 +679,9 @@ void E3Agent::notifySrsDataReady()
                     case e3::StreamType::N_RX_ANT_SRS:
                         cell_obj["n_rx_ant_srs"] = cell.n_rx_ant_srs;
                         break;
+                    case e3::StreamType::N_PRB_UL_BWP:
+                        cell_obj["n_prb_ul_bwp"] = cell.n_prb_ul_bwp;
+                        break;
                     case e3::StreamType::SRS_IQ_SAMPLES: {
                         json srs_iq_shm;
                         srs_iq_shm["shm_name"] = E3_SHARED_MEMORY_KEY;
@@ -715,25 +734,25 @@ void E3Agent::notifySrsDataReady()
                                 ue_obj["rnti"] = ue.rnti;
                                 break;
                             case e3::StreamType::SRS_WIDEBAND_SNR:
-                                ue_obj["srs_wideband_snr"] = ue.wideband_snr;
+                                ue_obj["srs_wideband_snr"] = finiteOrNull(ue.wideband_snr);
                                 break;
                             case e3::StreamType::SRS_SIGNAL_ENERGY:
-                                ue_obj["srs_signal_energy"] = ue.signal_energy;
+                                ue_obj["srs_signal_energy"] = finiteOrNull(ue.signal_energy);
                                 break;
                             case e3::StreamType::SRS_NOISE_ENERGY:
-                                ue_obj["srs_noise_energy"] = ue.noise_energy;
+                                ue_obj["srs_noise_energy"] = finiteOrNull(ue.noise_energy);
                                 break;
                             case e3::StreamType::SRS_TOA:
-                                ue_obj["srs_toa"] = ue.toa_us;
+                                ue_obj["srs_toa"] = finiteOrNull(ue.toa_us);
                                 break;
                             case e3::StreamType::SRS_HD_ANT_FLAG:
                                 ue_obj["srs_hd_ant_flag"] = ue.hd_ant_flag;
                                 break;
                             case e3::StreamType::SRS_SC_CORR:
-                                ue_obj["srs_sc_corr"] = {ue.sc_corr_re, ue.sc_corr_im};
+                                ue_obj["srs_sc_corr"] = {finiteOrNull(ue.sc_corr_re), finiteOrNull(ue.sc_corr_im)};
                                 break;
                             case e3::StreamType::SRS_CS_CORR_RATIO_DB:
-                                ue_obj["srs_cs_corr_ratio_db"] = ue.cs_corr_ratio_db;
+                                ue_obj["srs_cs_corr_ratio_db"] = finiteOrNull(ue.cs_corr_ratio_db);
                                 break;
                             case e3::StreamType::SRS_ANT_PORTS:
                                 ue_obj["srs_ant_ports"] = ue.n_ant_ports;
@@ -783,6 +802,24 @@ void E3Agent::notifySrsDataReady()
                             case e3::StreamType::SRS_PRG_SIZE:
                                 ue_obj["srs_prg_size"] = ue.prg_size;
                                 break;
+                            case e3::StreamType::SRS_SEQUENCE_ID:
+                                ue_obj["srs_sequence_id"] = ue.sequence_id;
+                                break;
+                            case e3::StreamType::SRS_CONFIG_IDX:
+                                ue_obj["srs_config_idx"] = ue.config_idx;
+                                break;
+                            case e3::StreamType::SRS_BANDWIDTH_IDX:
+                                ue_obj["srs_bandwidth_idx"] = ue.bandwidth_idx;
+                                break;
+                            case e3::StreamType::SRS_GROUP_SEQ_HOPPING:
+                                ue_obj["srs_group_seq_hopping"] = ue.group_seq_hopping;
+                                break;
+                            case e3::StreamType::SRS_START_PRG:
+                                ue_obj["srs_start_prg"] = ue.start_prg;
+                                break;
+                            case e3::StreamType::SRS_START_VALID_PRG:
+                                ue_obj["srs_start_valid_prg"] = ue.start_valid_prg;
+                                break;
                             case e3::StreamType::SRS_HEST_N_PRB_GRPS:
                                 ue_obj["srs_hest_n_prb_grps"] = ue.n_prb_grps;
                                 break;
@@ -823,7 +860,7 @@ void E3Agent::notifySrsDataReady()
         if (protocolData.empty()) {
             continue;
         }
-        notif_json["protocolData"] = protocolData;
+        notif_json["protocolData"] = std::move(protocolData);
 
         try {
             NVLOGD_FMT(TAG_E3, "TIMESTAMP_LOG: Before SRS ZMQ send at {}", std::chrono::high_resolution_clock::now().time_since_epoch().count());
@@ -1303,7 +1340,7 @@ void E3Agent::handleSetupRequest(const json& request, std::string& response) {
 		hest_shm_info["max_samples_per_row"] = maxHestSamplesPerRow;
 		
 		json hest_schema;
-		hest_schema["dimensions"] = "Variable per group: (N_DMRS_ESTIMATES, N_SUBCARRIERS, N_BS_ANTS, N_LAYERS)";
+		hest_schema["dimensions"] = "Variable per group, row-major: (N_DMRS_ESTIMATES, N_SUBCARRIERS, N_LAYERS, N_BS_ANTS)";
 		hest_schema["N_BS_ANTS"] = "Number of base station antennas (limited to 4)";
 		hest_schema["N_LAYERS"] = "Total spatial layers in the group";
 		hest_schema["N_SUBCARRIERS"] = "Number of subcarriers (PRBs * 12)";
@@ -1329,6 +1366,7 @@ void E3Agent::handleSetupRequest(const json& request, std::string& response) {
 		// Antenna and cell configuration streams
 		available_data_streams.push_back(createIndicationPayloadStream("n_rx_ant", "uint16", "Number of receive antennas"));
 		available_data_streams.push_back(createIndicationPayloadStream("n_rx_ant_srs", "uint16", "Number of SRS receive antennas"));
+		available_data_streams.push_back(createIndicationPayloadStream("n_prb_ul_bwp", "uint16", "UL bandwidth part size in PRBs; IQ PRBs at or above it are zero"));
 		available_data_streams.push_back(createIndicationPayloadStream("n_cells", "uint16", "Number of cells"));
 		
 		// H Estimates metadata (cell-level)
@@ -1355,7 +1393,7 @@ void E3Agent::handleSetupRequest(const json& request, std::string& response) {
 		available_data_streams.push_back(createIndicationPayloadStream("n_layers", "uint8", "Number of spatial layers [per-UE]"));
 		available_data_streams.push_back(createIndicationPayloadStream("tb_size", "uint32", "Transport block size in bytes [per-UE]"));
 		available_data_streams.push_back(createIndicationPayloadStream("pdu_len", "uint32", "PDU length in bytes (tb_size on CRC pass, 0 on fail) [per-UE]"));
-		available_data_streams.push_back(createIndicationPayloadStream("pdu_offset", "uint32", "Byte offset of UE PDU in SHM PUSCH row [per-UE]"));
+		available_data_streams.push_back(createIndicationPayloadStream("pdu_offset", "uint32", "Byte offset of UE PDU from the start of the SHM PUSCH buffer half [per-UE]"));
 		available_data_streams.push_back(createIndicationPayloadStream("target_code_rate", "uint16", "Target code rate (x10, e.g. 3080 = R=0.308) [per-UE]"));
 		available_data_streams.push_back(createIndicationPayloadStream("new_data_indicator", "uint8", "New data indicator (0=retx, 1=new) [per-UE]"));
 		available_data_streams.push_back(createIndicationPayloadStream("layer_offset", "uint16", "Start index in H matrix layer dimension within group [per-UE]"));
@@ -1432,6 +1470,12 @@ void E3Agent::handleSetupRequest(const json& request, std::string& response) {
 		available_data_streams.push_back(createIndicationPayloadStream("srs_usage", "uint32", "SRS usage bitmask [per-UE]"));
 		available_data_streams.push_back(createIndicationPayloadStream("srs_n_valid_prg", "uint16", "Number of valid PRB groups in SRS [per-UE]"));
 		available_data_streams.push_back(createIndicationPayloadStream("srs_prg_size", "uint16", "SRS PRB group size [per-UE]"));
+		available_data_streams.push_back(createIndicationPayloadStream("srs_sequence_id", "uint16", "SRS sequence ID n_ID^SRS [per-UE]"));
+		available_data_streams.push_back(createIndicationPayloadStream("srs_config_idx", "uint8", "SRS bandwidth config index C_SRS [per-UE]"));
+		available_data_streams.push_back(createIndicationPayloadStream("srs_bandwidth_idx", "uint8", "SRS bandwidth index B_SRS [per-UE]"));
+		available_data_streams.push_back(createIndicationPayloadStream("srs_group_seq_hopping", "uint8", "0=none, 1=group hopping, 2=sequence hopping [per-UE]"));
+		available_data_streams.push_back(createIndicationPayloadStream("srs_start_prg", "uint16", "First PRB group covered by the SRS H-estimate buffer [per-UE]"));
+		available_data_streams.push_back(createIndicationPayloadStream("srs_start_valid_prg", "uint16", "First PRB group holding a valid channel estimate [per-UE]"));
 
 		// E3-RanFunctionDefinition: telemetry IDs 1..STREAM_TYPE_COUNT
 		json telemetry_id_list = json::array();
@@ -1539,8 +1583,8 @@ void E3Agent::handleSubscriptionRequest(const json& request, std::string& respon
                     e3_sub_response["responseCode"] = "positive";
                     e3_sub_response["subscriptionId"] = sub_id;
                     e3_sub_response["ranFunctionIdentifier"] = ran_func_id;
-                    e3_sub_response["telemetryGrantedList"] = telemetry_ids;
-                    e3_sub_response["controlGrantedList"] = json::array();
+                    e3_sub_response["telemetryIdentifierList"] = telemetry_ids;
+                    e3_sub_response["controlIdentifierList"] = json::array();
                     e3_sub_response["periodicity"] = periodicity_us;
                 }
             }

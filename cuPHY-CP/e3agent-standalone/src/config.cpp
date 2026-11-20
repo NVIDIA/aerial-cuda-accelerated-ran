@@ -140,11 +140,13 @@ void parse_synth(const YAML::Node& n, SynthCfg& s, const RowsCfg& rows) {
 	}
 }
 
-void parse_replay(const YAML::Node& n, ReplayCfg& r) {
-	only(n, "replay", {"path", "loops"});
+void parse_replay(const YAML::Node& n, ReplayCfg& r, bool used) {
+	only(n, "replay", {"path", "loops", "wait_for_subscriber"});
 	r.path = scalar<std::string>(n, "replay", "path");
 	r.loops = scalar_or<uint64_t>(n, "replay", "loops", r.loops);
+	r.wait_for_subscriber = scalar_or<bool>(n, "replay", "wait_for_subscriber", r.wait_for_subscriber);
 	if (r.path.empty()) fail("replay.path: must be non-empty");
+	if (!used) return;  // synth mode never opens the trace
 	struct stat st{};
 	if (stat(r.path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || access(r.path.c_str(), R_OK) != 0) {
 		fail("replay.path: not a readable file '" + r.path + "'");
@@ -153,10 +155,22 @@ void parse_replay(const YAML::Node& n, ReplayCfg& r) {
 
 } // namespace
 
-Config Config::load(const std::string& path) {
+Config Config::load(const std::string& path, const Overrides& ov) {
 	YAML::Node root;
 	try {
 		root = YAML::LoadFile(path);
+		const auto set = [&root](const std::string& v, const char* block, const char* key) {
+			if (v.empty()) return;
+			if (block) root[block][key] = v;
+			else root[key] = v;
+		};
+		set(ov.mode, nullptr, "mode");
+		set(ov.log_level, nullptr, "log_level");
+		set(ov.feeder_core, "cpu", "feeder_core");
+		set(ov.duration_slots, "synth", "duration_slots");
+		set(ov.trace, "replay", "path");
+		set(ov.loops, "replay", "loops");
+		set(ov.wait_for_subscriber, "replay", "wait_for_subscriber");
 	} catch (const YAML::Exception& e) {
 		fail("failed to load '" + path + "': " + e.what());
 	}
@@ -167,6 +181,10 @@ Config Config::load(const std::string& path) {
 	if (mode == "synth") c.mode = Mode::Synth;
 	else if (mode == "replay") c.mode = Mode::Replay;
 	else fail("mode: must be 'synth' or 'replay' (got '" + mode + "')");
+	if (c.mode == Mode::Synth && (!ov.trace.empty() || !ov.loops.empty() || !ov.wait_for_subscriber.empty()))
+		fail("--trace, --loops and --wait-subscriber need replay mode");
+	if (c.mode == Mode::Replay && !ov.duration_slots.empty())
+		fail("--duration-slots needs synth mode");
 
 	c.log_level = scalar_or<std::string>(root, "root", "log_level", c.log_level);
 	if (c.log_level != "VRB" && c.log_level != "DBG" && c.log_level != "INF" &&
@@ -186,9 +204,9 @@ Config Config::load(const std::string& path) {
 
 	// replay is required in replay mode, optional in synth.
 	if (c.mode == Mode::Replay) {
-		parse_replay(require(root, "root", "replay"), c.replay);
+		parse_replay(require(root, "root", "replay"), c.replay, true);
 	} else if (root["replay"]) {
-		parse_replay(root["replay"], c.replay);
+		parse_replay(root["replay"], c.replay, false);
 	}
 
 	return c;

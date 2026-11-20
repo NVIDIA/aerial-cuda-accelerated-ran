@@ -44,3 +44,4 @@ synth:                       # used when mode: synth
 replay:                      # used when mode: replay
   path: /data/session.trace  # in-container path (compose mounts ./data:/data:ro)
   loops: 0                   # 0 = loop forever; pacing from ts_tai delta (clamp 1 s)
+  wait_for_subscriber: false # true = start each pass on the first E3 subscription, restart when the last is released

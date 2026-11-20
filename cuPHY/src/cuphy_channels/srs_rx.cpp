@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include "srs_rx.hpp"
@@ -236,6 +237,7 @@ void SrsRx::createComponents(cuphySrsFilterPrms_t* pSrsFilterPrms, cudaStream_t 
 
  SrsRx::SrsRx(cuphySrsStatPrms_t const* pStatPrms, cudaStream_t cuStream) :
     m_LinearAlloc(getBufferSize(pStatPrms), &m_memoryFootprint),
+    m_tRefDataRx(pStatPrms->nMaxCellsPerSlot),
     m_gpuAddrsChEstToL2InnerVec(CUPHY_SRS_MAX_N_USERS),
     m_gpuAddrsChEstToL2Vec(CUPHY_SRS_MAX_N_USERS),
     m_srsCellPrmsVec(pStatPrms->nMaxCellsPerSlot),
@@ -247,7 +249,7 @@ void SrsRx::createComponents(cuphySrsFilterPrms_t* pSrsFilterPrms, cudaStream_t 
     m_pRkhsPrms(pStatPrms->pSrsRkhsPrms),
     m_kernelStatDescr("SrsStatDescr"),
     m_kernelDynDescr("SrsDynDescr"),
-    m_batchedMemcpyHelper(CUPHY_SRS_MAX_N_USERS + 2 + MAX_CELLS_PER_SLOT, // +2 for SRS reports and rbSnrBuffer, + per-cell SRS IQ copies
+    m_batchedMemcpyHelper(CUPHY_SRS_MAX_N_USERS + 2, // +2 for SRS reports and rbSnrBuffer
                           batchedMemcpySrcHint::srcIsDevice, 
                           batchedMemcpyDstHint::dstIsHost, 
                           (SRS_USE_BATCHED_MEMCPY == 1) && (pStatPrms->enableBatchedMemcpy == 1))
@@ -376,11 +378,25 @@ void SrsRx::setupCmn(const cuphySrsDynPrms_t *pDynPrm)
         m_srsCellPrmsVec[dynCellIdx].nSrsSym      = pCellPrms[dynCellIdx].nSrsSym;
         m_srsCellPrmsVec[dynCellIdx].nRxAntSrs    = m_hCellStatPrms[statCellIdx].nRxAntSrs;
         m_srsCellPrmsVec[dynCellIdx].mu           = m_hCellStatPrms[statCellIdx].mu;
+
+        if(pDynPrm->pDataOut->pDataRxSrs)
+        {
+            // View of the nPrbUlBwp PRBs inside the srs_prb_stride pitched input buffer
+            cuphyDataType_t dataType;
+            int             rank;
+            int             dims[CUPHY_DIM_MAX];
+            int             strides[CUPHY_DIM_MAX];
+            CUPHY_CHECK(cuphyGetTensorDescriptor(m_hPrmDataRx[dynCellIdx].desc, CUPHY_DIM_MAX, &dataType, &rank, dims, strides));
+            dims[0] = std::min(dims[0], CUPHY_N_TONES_PER_PRB * static_cast<int>(m_hCellStatPrms[statCellIdx].nPrbUlBwp));
+            CUPHY_CHECK(cuphySetTensorDescriptor(m_tRefDataRx[dynCellIdx].desc().handle(), dataType, rank, dims, strides, CUPHY_TENSOR_ALIGN_DEFAULT));
+            m_tRefDataRx[dynCellIdx].set_addr(m_hPrmDataRx[dynCellIdx].pAddr);
+        }
     }
 
     // Output parameters:
     m_outputPrms.cpuCopyOn           = pDynPrm->cpuCopyOn;
     m_outputPrms.pDataRxSrsHost      = pDynPrm->pDataOut->pDataRxSrs;
+    m_outputPrms.dataRxSrsHostCellStride = pDynPrm->pDataOut->dataRxSrsHostCellStride;
     m_outputPrms.h_chEstBuffInfo     = pDynPrm->pDataOut->pChEstBuffInfo;
     m_outputPrms.h_srsReports        = pDynPrm->pDataOut->pSrsReports;
     m_outputPrms.h_rbSnrBuffer       = pDynPrm->pDataOut->pRbSnrBuffer;
@@ -426,19 +442,23 @@ void SrsRx::setupCmn(const cuphySrsDynPrms_t *pDynPrm)
     if(m_nSrsUes > 0) {
         m_batchedMemcpyHelper.reset(); // reset for upcoming batch of updateMemcpy calls
 
-        // Add raw SRS IQ copy (buf_st_2 GPU->host) for DataLake
+        // Raw SRS IQ copy (buf_st_2 GPU->host) for DataLake, re-pitched from srs_prb_stride to MAX_N_PRBS_SUPPORTED
         if(m_outputPrms.pDataRxSrsHost) {
-            size_t perCellSize = 0;
-            cuphyGetTensorSizeInBytes(m_hPrmDataRx[0].desc, &perCellSize);
-            size_t perCellElems = perCellSize / sizeof(__half2);
+            constexpr size_t hostRowBytes = MAX_N_PRBS_SUPPORTED * CUPHY_N_TONES_PER_PRB * sizeof(__half2);
             for(int32_t cellIdx = 0; cellIdx < m_nCells; ++cellIdx) {
-                m_batchedMemcpyHelper.updateMemcpy(
-                    m_outputPrms.pDataRxSrsHost + perCellElems * cellIdx,
-                    m_hPrmDataRx[cellIdx].pAddr,
-                    perCellSize,
-                    cudaMemcpyDeviceToHost,
-                    cuStream
-                );
+                // Copies symbol and antenna rows as one 2D block: requires strides[2] == strides[1] * dims[1]
+                int dims[CUPHY_DIM_MAX];
+                int strides[CUPHY_DIM_MAX];
+                CUPHY_CHECK(cuphyGetTensorDescriptor(m_tRefDataRx[cellIdx].desc().handle(), CUPHY_DIM_MAX, nullptr, nullptr, dims, strides));
+                MemtraceDisableScope md;
+                CUDA_CHECK_EXCEPTION(cudaMemcpy2DAsync(m_outputPrms.pDataRxSrsHost + static_cast<size_t>(m_outputPrms.dataRxSrsHostCellStride) * cellIdx,
+                                                       hostRowBytes,
+                                                       m_tRefDataRx[cellIdx].addr(),
+                                                       strides[1] * sizeof(__half2),
+                                                       dims[0] * sizeof(__half2),
+                                                       dims[1] * dims[2],
+                                                       cudaMemcpyDeviceToHost,
+                                                       cuStream));
             }
         }
 

@@ -1869,6 +1869,12 @@ int YamlParser::parse_cuphydriver_configs(yaml::node root)
             } else {
                 phydriver_config.datalake_drop_tables = 0;
             }
+
+            if(data_cfg.has_key("datalake_compression")) {
+                phydriver_config.datalake_compression = data_cfg["datalake_compression"].as<std::string>();
+            } else {
+                phydriver_config.datalake_compression = "";
+            }
             
             // Parse enabled data types array
             if(data_cfg.has_key("datalake_data_types")) {
@@ -1896,6 +1902,7 @@ int YamlParser::parse_cuphydriver_configs(yaml::node root)
             phydriver_config.num_rows_srs = 70;
             phydriver_config.num_rows_srs_hest = 90;
             phydriver_config.datalake_drop_tables = 0;
+            phydriver_config.datalake_compression = "";
             phydriver_config.e3_agent_enabled = false;
             phydriver_config.e3_rep_port = 5555;
             phydriver_config.e3_pub_port = 5556;
@@ -2366,6 +2373,9 @@ uint8_t YamlParser::get_cuphydriver_datalake_drop_tables() {
     return phydriver_config.datalake_drop_tables;
 }
 
+std::string& YamlParser::get_cuphydriver_datalake_compression() {
+    return phydriver_config.datalake_compression;
+}
 
 std::vector<uint16_t>& YamlParser::get_cuphydriver_gpus() {
     return phydriver_config.gpus_list;

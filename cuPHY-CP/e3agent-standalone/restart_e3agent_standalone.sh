@@ -21,30 +21,57 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: ./restart_e3agent_standalone.sh [-b|--build] [-c|--config PATH]
+Usage: ./restart_e3agent_standalone.sh [-b|--build] [-c|--config PATH] [--synth|--replay]
+                                       [-t|--trace PATH] [--loops N] [--wait-subscriber]
+                                       [--log-level LVL] [--feeder-core N] [--duration-slots N]
 
   -b, --build         Rebuild the image (auto-enabled if the image does not exist yet).
                       Needed after C++ or staged data_lake source changes.
   -c, --config PATH   Config file relative to the tool dir; a bare name resolves
                       under config/. Default: config/e3agent-standalone.example.yaml
   -h, --help          Show this help.
+
+Overrides (take precedence over the config file):
+  --synth, --replay   mode
+  -t, --trace PATH    replay.path; any host file, mounted read only. Implies --replay.
+  --loops N           replay.loops (0 = forever)
+  --wait-subscriber   replay.wait_for_subscriber: start each pass on the first E3 subscription,
+                      restart from the first slot when the last one is released
+  --log-level LVL     log_level (VRB|DBG|INF|WRN|ERR|FAT)
+  --feeder-core N     cpu.feeder_core (-1 = no pinning)
+  --duration-slots N  synth.duration_slots (0 = forever)
 EOF
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
 
 BUILD=0
 CONFIG_FILE="config/e3agent-standalone.example.yaml"
+TRACE=""
+OVERRIDES=()
 while [ $# -gt 0 ]; do
     case "$1" in
         -b|--build)   BUILD=1; shift;;
         -c|--config)  [ $# -ge 2 ] || { echo "Missing PATH for $1" >&2; usage; exit 1; }; CONFIG_FILE="$2"; shift 2;;
+        --synth|--replay|--wait-subscriber) OVERRIDES+=("$1"); shift;;
+        -t|--trace)
+            [ $# -ge 2 ] || { echo "Missing PATH for $1" >&2; usage; exit 1; }
+            TRACE="$(realpath -e -- "$2" 2>/dev/null)" && [ -f "$TRACE" ] && [ -r "$TRACE" ] \
+                || { echo "ERROR: trace '$2' is not a readable file" >&2; exit 1; }
+            shift 2;;
+        --loops|--log-level|--feeder-core|--duration-slots)
+            [ $# -ge 2 ] || { echo "Missing value for $1" >&2; usage; exit 1; }; OVERRIDES+=("$1" "$2"); shift 2;;
         -h|--help)    usage; exit 0;;
         *) echo "Unknown option: $1" >&2; usage; exit 1;;
     esac
 done
+cd "$SCRIPT_DIR"
 case "$CONFIG_FILE" in */*) ;; *) CONFIG_FILE="config/$CONFIG_FILE";; esac
+
+if [ -n "$TRACE" ]; then
+    export E3SA_TRACE_DIR="$(dirname "$TRACE")"
+    OVERRIDES+=(--trace "/trace/$(basename "$TRACE")")
+fi
 
 echo "=== restart e3agent-standalone ==="
 
@@ -75,18 +102,21 @@ fi
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "WARNING: config '$CONFIG_FILE' not found under $SCRIPT_DIR" >&2
 fi
-export E3SA_CONFIG="$CONFIG_FILE"
 echo "Config: $CONFIG_FILE (build=$BUILD)"
+[ -z "$TRACE" ] || echo "Trace: $TRACE"
+[ ${#OVERRIDES[@]} -eq 0 ] || echo "Overrides: ${OVERRIDES[*]}"
 
+NAME="e3agent-standalone"
 docker compose down --remove-orphans 2>/dev/null || true
-trap 'echo; echo "Stopping container..."; docker compose down' EXIT
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+trap 'echo; echo "Stopping container..."; docker stop "$NAME" >/dev/null 2>&1 || true; docker rm "$NAME" >/dev/null 2>&1 || true' EXIT
 
-echo "Starting container (Ctrl-C to stop)..."
 if [ "$BUILD" -eq 1 ]; then
     echo "Deleting existing image..."
     docker image rm "$IMAGE" 2>/dev/null || true
-    docker compose up --build
+    docker compose build
 else
     echo "Reusing existing image (pass -b to rebuild after source changes)."
-    docker compose up
 fi
+echo "Starting container (Ctrl-C to stop)..."
+docker compose run --rm --name "$NAME" "$NAME" ./build/e3agent_standalone --config "$CONFIG_FILE" "${OVERRIDES[@]}"

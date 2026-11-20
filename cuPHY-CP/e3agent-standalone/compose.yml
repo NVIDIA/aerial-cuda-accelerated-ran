@@ -28,5 +28,6 @@ services:
       - ./config:/opt/e3agent-standalone/config:ro
       - ./logs:/logs
       - ./data:/data:ro   # replay traces (e.g., clickhouse_to_trace.py output); used in replay mode
+      - ${E3SA_TRACE_DIR:-./data}:/trace:ro   # directory of the --trace file
     command: ["./build/e3agent_standalone", "--config", "${E3SA_CONFIG:-config/e3agent-standalone.example.yaml}"]
     restart: "no"

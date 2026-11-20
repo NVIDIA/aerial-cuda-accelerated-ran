@@ -46,21 +46,48 @@ e3shim::Level toLevel(const std::string& s) {
 	if (s == "FAT") return e3shim::FAT;
 	return e3shim::INF;
 }
+
+int usage(const char* prog) {
+	std::fprintf(stderr,
+		"usage: %s --config <path> [--synth|--replay] [--trace <path>] [--loops <n>]\n"
+		"       [--wait-subscriber] [--log-level <lvl>] [--feeder-core <n>] [--duration-slots <n>]\n"
+		"Options override the matching config keys; --trace implies --replay.\n", prog);
+	return 2;
+}
 }
 
 int main(int argc, char** argv) {
 	const char* cfg_path = nullptr;
+	e3sa::Overrides ov;
 	for (int i = 1; i < argc; ++i) {
-		if (std::strcmp(argv[i], "--config") == 0 && i + 1 < argc) cfg_path = argv[++i];
+		const char* a = argv[i];
+		if (!std::strcmp(a, "--synth") || !std::strcmp(a, "--replay")) {
+			const std::string m = a + 2;
+			if (!ov.mode.empty() && ov.mode != m) return usage(argv[0]);
+			ov.mode = m;
+			continue;
+		}
+		if (!std::strcmp(a, "--wait-subscriber")) {
+			ov.wait_for_subscriber = "true";
+			continue;
+		}
+		if (i + 1 >= argc) return usage(argv[0]);
+		const char* v = argv[++i];
+		if (!*v) return usage(argv[0]);
+		if (!std::strcmp(a, "--config")) cfg_path = v;
+		else if (!std::strcmp(a, "--trace")) ov.trace = v;
+		else if (!std::strcmp(a, "--loops")) ov.loops = v;
+		else if (!std::strcmp(a, "--log-level")) ov.log_level = v;
+		else if (!std::strcmp(a, "--feeder-core")) ov.feeder_core = v;
+		else if (!std::strcmp(a, "--duration-slots")) ov.duration_slots = v;
+		else return usage(argv[0]);
 	}
-	if (!cfg_path) {
-		std::fprintf(stderr, "usage: %s --config <path>\n", argv[0]);
-		return 2;
-	}
+	if (!cfg_path) return usage(argv[0]);
+	if (!ov.trace.empty() && ov.mode.empty()) ov.mode = "replay";
 
 	e3sa::Config cfg;
 	try {
-		cfg = e3sa::Config::load(cfg_path);
+		cfg = e3sa::Config::load(cfg_path, ov);
 	} catch (const std::exception& e) {
 		std::fprintf(stderr, "%s\n", e.what());
 		return 1;

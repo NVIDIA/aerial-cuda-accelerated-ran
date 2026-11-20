@@ -17,6 +17,7 @@
 
 #include <regex>
 #include <cstring>
+#include <set>
 #include "data_lake.hpp"
 #include "e3_agent.hpp"
 
@@ -322,6 +323,31 @@ void DataLake::initMem(void) {
 		numSamples_,numRowsToInsertFh,numRowsToInsertPusch,numRowsToInsertHest,numRowsToInsertSrsIq,numRowsToInsertSrs,numRowsToInsertSrsHest);
 }
 
+static std::set<std::string> dbColumns(ch::Client* client, const std::string& table) {
+	std::set<std::string> cols;
+	client->Select("DESCRIBE TABLE " + table, [&cols](const ch::Block& block) {
+		for (size_t i = 0; i < block.GetRowCount(); ++i) {
+			cols.insert(fmt::format("{} {}", block[0]->As<ch::ColumnString>()->At(i), block[1]->As<ch::ColumnString>()->At(i)));
+		}
+	});
+	return cols;
+}
+
+static bool schemaMatches(ch::Client* client, const std::string& table, const std::string& ddl) {
+	const std::string expectedTable = table + "_expected";
+	const size_t open = ddl.find('(');
+	client->Execute("CREATE TEMPORARY TABLE " + expectedTable + " " + ddl.substr(open, ddl.find("ENGINE") - open) + "ENGINE = Memory");
+	const auto expected = dbColumns(client, expectedTable), actual = dbColumns(client, table);
+	client->Execute("DROP TEMPORARY TABLE " + expectedTable);
+	if (expected == actual) return true;
+	std::vector<std::string> missing, extra;
+	std::set_difference(expected.begin(), expected.end(), actual.begin(), actual.end(), std::back_inserter(missing));
+	std::set_difference(actual.begin(), actual.end(), expected.begin(), expected.end(), std::back_inserter(extra));
+	NVLOGE_FMT(TAG_DATALAKE, AERIAL_CONFIG_EVENT, "Table {} schema mismatch, missing: [{}], unexpected: [{}]",
+		table, fmt::format("{}", fmt::join(missing, ", ")), fmt::format("{}", fmt::join(extra, ", ")));
+	return false;
+}
+
 void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 	NVLOGD_FMT(TAG_DATALAKE,"{} connecting to database at {}",__func__,host);
 	static bool initDone = false;
@@ -334,12 +360,13 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 		srsHestClient = new ch::Client(ch::ClientOptions().SetHost(host));
 		if (dropTables) {
 			NVLOGC_FMT(TAG_DATALAKE,"Dropping tables per datalake_drop_tables");
-			dbClient->Execute("DROP TABLE IF EXISTS fapi");
-			fhClient->Execute("DROP TABLE IF EXISTS fh");
-			hestClient->Execute("DROP TABLE IF EXISTS hest");
-			srsIqClient->Execute("DROP TABLE IF EXISTS srs_iq");
-			srsClient->Execute("DROP TABLE IF EXISTS srs");
-			srsHestClient->Execute("DROP TABLE IF EXISTS srs_hest");
+			const std::string dropOpts = " SYNC SETTINGS max_table_size_to_drop = 0";
+			dbClient->Execute("DROP TABLE IF EXISTS fapi" + dropOpts);
+			fhClient->Execute("DROP TABLE IF EXISTS fh" + dropOpts);
+			hestClient->Execute("DROP TABLE IF EXISTS hest" + dropOpts);
+			srsIqClient->Execute("DROP TABLE IF EXISTS srs_iq" + dropOpts);
+			srsClient->Execute("DROP TABLE IF EXISTS srs" + dropOpts);
+			srsHestClient->Execute("DROP TABLE IF EXISTS srs_hest" + dropOpts);
 		}
 		if (engine != "Memory") {
 			NVLOGC_FMT(TAG_DATALAKE,"Creating tables using datalake_engine: {}",engine);
@@ -414,6 +441,11 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 			) \
 			ENGINE = " + engine + ";";
 
+		const std::string codec = columnCodec.empty() ? "" : " CODEC(" + columnCodec + ")";
+		if (!codec.empty()) {
+			NVLOGC_FMT(TAG_DATALAKE, "Array columns of new tables use{}", codec);
+		}
+
 		// Create the fronthaul data table
 		std::string createTableFh = "CREATE TABLE IF NOT EXISTS fh ( \
 			CellId 			UInt16	NOT NULL, \
@@ -423,8 +455,9 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 			Slot			UInt16	NOT NULL, \
 			nRxAnt 			UInt16	NOT NULL, \
 			nRxAntSrs		UInt16	NOT NULL, \
+			nPrbUlBwp		UInt16	NOT NULL, \
 			nUEs			UInt16	NOT NULL, \
-			fhData 			Array(Int16) \
+			fhData 			Array(Int16)" + codec + " \
 			) \
 			ENGINE = " + engine + ";";
 
@@ -436,7 +469,7 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 		SFN				UInt16	NOT NULL, \
 		Slot			UInt16	NOT NULL, \
 		hestSize		UInt32	NOT NULL, \
-		hestData 		Array(Float32) \
+		hestData 		Array(Float32)" + codec + " \
 		) \
 		ENGINE = " + engine + ";";
 
@@ -447,8 +480,9 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 		SFN				UInt16	NOT NULL, \
 		Slot			UInt16	NOT NULL, \
 		nRxAntSrs		UInt16	NOT NULL, \
+		nPrbUlBwp		UInt16	NOT NULL, \
 		nSrsUes			UInt16	NOT NULL, \
-		iqData			Array(Int16) \
+		iqData			Array(Int16)" + codec + " \
 		) \
 		ENGINE = " + engine + ";";
 
@@ -487,6 +521,8 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 		configIdx		UInt8, \
 		bandwidthIdx	UInt8, \
 		groupOrSequenceHopping	UInt8, \
+		srsStartPrg		UInt16, \
+		startValidPrg	UInt16, \
 		nPrbGrps		UInt16, \
 		prbGrpSize		UInt16, \
 		rbSnrSize		UInt32, \
@@ -505,7 +541,7 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 		Slot			UInt16	NOT NULL, \
 		rnti			UInt16	NOT NULL, \
 		hestSize		UInt32	NOT NULL, \
-		hestData		Array(Int16) \
+		hestData		Array(Int16)" + codec + " \
 		) \
 		ENGINE = " + engine + ";";
 
@@ -525,6 +561,17 @@ void DataLake::dbInit (std::string host, std::string engine, bool dropTables) {
 		srsIqClient->Execute(createTableSrsIq);
 		srsClient->Execute(createTableSrs);
 		srsHestClient->Execute(createTableSrsHest);
+
+		bool schemaOk = schemaMatches(dbClient, "fapi", createTableFapi);
+		schemaOk = schemaMatches(fhClient, "fh", createTableFh) && schemaOk;
+		schemaOk = schemaMatches(hestClient, "hest", createTableHest) && schemaOk;
+		schemaOk = schemaMatches(srsIqClient, "srs_iq", createTableSrsIq) && schemaOk;
+		schemaOk = schemaMatches(srsClient, "srs", createTableSrs) && schemaOk;
+		schemaOk = schemaMatches(srsHestClient, "srs_hest", createTableSrsHest) && schemaOk;
+		if (!schemaOk) {
+			NVLOGF_FMT(TAG_DATALAKE, AERIAL_CONFIG_EVENT,
+				"Data Lake tables at {} do not match this build. Drop the tables listed above, or set datalake_drop_tables: 1 once to drop all; both delete their data.", host);
+		}
 
 		initDone = true;
 	}
@@ -569,10 +616,13 @@ void DataLake::notify(uint32_t nCrc,
 		params_ = params;
 		out_ = out;
 		puschStatPrms_ = puschStatPrms;
+		const bool haveCrcs = out->pTbCrcs && out->pStartOffsetsTbCrc;
+		for (uint16_t u = 0; u < params->cell_grp_info.nUes; ++u)
+			tbCrcFail_[u] = haveCrcs ? (out->pTbCrcs[out->pStartOffsetsTbCrc[u]] != 0) : 1;
 		notifyTime = std::chrono::high_resolution_clock::now();
 
 		NVLOGD_FMT(TAG_DATALAKE,"{:4}.{:02} Notify called",slot->sfn_,slot->slot_);
-		__atomic_store_n(&dataLakeWorkReady, true, __ATOMIC_RELAXED);
+		__atomic_store_n(&dataLakeWorkReady, true, __ATOMIC_RELEASE);
 	} else {
 		NVLOGI_FMT(TAG_DATALAKE,"{:4}.{:02} Notify skipped",slot->sfn_,slot->slot_);
 	}
@@ -607,7 +657,7 @@ void DataLake::notifySrs(
 void* waitForLakeData(DataLake* dl)
 {
 	while (1) {
-		if (__atomic_load_n(&dataLakeWorkReady, __ATOMIC_RELAXED)) {
+		if (__atomic_load_n(&dataLakeWorkReady, __ATOMIC_ACQUIRE)) {
 			__atomic_store_n(&dataLakeWorkReady, false, __ATOMIC_RELAXED);
 			__atomic_store_n(&dataLakeWorking, true, __ATOMIC_RELAXED);
 			dl->collectSlot();
@@ -680,7 +730,15 @@ void DataLake::collectSlot(void)
 		}
 	}
 
+	// A ring that cannot fit this slot is still short of numRowsToInsert, so it never swaps on its own
+	pFh->collectFull   |= pFh->tsSwNs.size() + params_->cell_grp_info.nCells > static_cast<size_t>(numRowsToInsertFh);
+	pHest->collectFull |= pHest->tsSwNs.size() + params_->cell_grp_info.nCells > static_cast<size_t>(numRowsToInsertHest);
+	if (pFh->collectFull || pHest->collectFull) {
+		doInsertsPusch();
+	}
+
 	if(pFh->tsSwNs.size() + params_->cell_grp_info.nCells > static_cast<size_t>(numRowsToInsertFh)) {
+		pFh->collectFullTime = std::chrono::high_resolution_clock::now();
 		NVLOGW_FMT(TAG_DATALAKE,"{:4}.{:02} {} us: Skipping slot because {} buffer full, size: {}. Filled in {} ms",
 			slot_->sfn_,slot_->slot_,GET_ELAPSED_US(notifyTime),pFh->bufferName,pFh->tsTaiNs.size(),
 			std::chrono::duration_cast<std::chrono::milliseconds>(pFh->collectFullTime - pFh->collectStartTime).count());
@@ -688,6 +746,7 @@ void DataLake::collectSlot(void)
 	}
 
 	if(pHest->tsSwNs.size() + params_->cell_grp_info.nCells > static_cast<size_t>(numRowsToInsertHest)) {
+		pHest->collectFullTime = std::chrono::high_resolution_clock::now();
 		NVLOGW_FMT(TAG_DATALAKE,"{:4}.{:02} {} us: Skipping slot because {} H estimates buffer full, size: {}. Filled in {} ms",
 			slot_->sfn_,slot_->slot_,GET_ELAPSED_US(notifyTime),pHest->bufferName,pHest->tsTaiNs.size(),
 			std::chrono::duration_cast<std::chrono::milliseconds>(pHest->collectFullTime - pHest->collectStartTime).count());
@@ -751,6 +810,7 @@ void DataLake::collectSlot(void)
 				cell.cell_id              = pCell.phyCellId;
 				cell.n_rx_ant             = pCell.nRxAnt;
 				cell.n_rx_ant_srs         = pCell.nRxAntSrs;
+				cell.n_prb_ul_bwp         = pCell.nPrbUlBwp;
 				cell.n_bs_ants            = pCell.nRxAnt;
 				cell.current_fh_buffer    = curFh;
 				cell.fh_write_index       = fhBase + c;
@@ -763,14 +823,14 @@ void DataLake::collectSlot(void)
 				cell.ues.clear();
 			}
 
-			// Per-UE PDU byte offset within the slot's PUSCH region (copy/ueIdx order).
+			// Per-UE PDU byte offset from the start of the PUSCH buffer half (copy/ueIdx order).
+			// PDUs are packed back-to-back across slots until the half flips.
 			uint16_t numUes = params_->cell_grp_info.nUes;
 			uint32_t uePduOffset[MAX_N_TBS_PER_CELL_GROUP_SUPPORTED] = {};
-			uint32_t pduAcc = 0;
+			uint32_t pduAcc = static_cast<uint32_t>(p->pPduData.back() - p->pDataAlloc);
 			for (uint16_t u = 0; u < numUes; ++u) {
 				uePduOffset[u] = pduAcc;
-				uint8_t crcFail = (out_->pTbCrcs && out_->pStartOffsetsTbCrc) ? (out_->pTbCrcs[out_->pStartOffsetsTbCrc[u]] != 0) : 1;
-				if (crcFail == 0 || storeFailedPdu) pduAcc += params_->ue_tb_size[u];
+				if (tbCrcFail_[u] == 0 || storeFailedPdu) pduAcc += params_->ue_tb_size[u];
 			}
 
 			// Per-UE metrics, grouped into their owning cell.
@@ -809,7 +869,7 @@ void DataLake::collectSlot(void)
 					m.n_dmrs_estimates = (grp->pDmrsDynPrm != nullptr) ? grp->pDmrsDynPrm->dmrsAddlnPos + 1 : 0;
 					m.dmrs_symb_pos = grp->dmrsSymLocBmsk;
 
-					m.tb_crc_fail = (out_->pTbCrcs && out_->pStartOffsetsTbCrc)	? ((out_->pTbCrcs[out_->pStartOffsetsTbCrc[ueIdx]] != 0) ? 1 : 0) : 1;
+					m.tb_crc_fail = tbCrcFail_[ueIdx];
 					m.pdu_len = (m.tb_crc_fail == 0) ? m.tb_size : 0;
 					m.pdu_offset = uePduOffset[ueIdx];
 
@@ -979,7 +1039,7 @@ void DataLake::collectSlot(void)
 			p->numCb.push_back(numCbsForUe);
 
 			// Zero means success but fapi wants 1 to mean failure
-			uint8_t crcFail = (out_->pTbCrcs && out_->pStartOffsetsTbCrc) ? (out_->pTbCrcs[out_->pStartOffsetsTbCrc[ueIdx]] != 0) : 1;
+			uint8_t crcFail = tbCrcFail_[ueIdx];
 			p->tbCrcFail.push_back(crcFail);
 			bool savePdu = (crcFail == 0 || storeFailedPdu);
 
@@ -1059,21 +1119,23 @@ void DataLake::collectSlot(void)
 			pFh->cellId.push_back(cellId);
 			pFh->nRxAnt.push_back(nrxant);
 			pFh->nRxAntSrs.push_back(nrxantsrs);
+			pFh->nPrbUlBwp.push_back(pCell.nPrbUlBwp);
 
 
-			uint32_t offset = 273*12*14*16; // Max 16 antenna ports
+			const size_t copySamples = std::min<size_t>(static_cast<size_t>(fhSamplesPerAnt) * nrxant, numFhSamples);
 
 			auto type_conversion_start_time = std::chrono::high_resolution_clock::now();
 			size_t dataIndex = (pFh->tsTaiNs.size() - 1);
 			auto copyStart = std::chrono::high_resolution_clock::now();
 			// Can't do all of the cells at once because the memory isn't contiguous from GPU
-			int16_t* prbs_int = reinterpret_cast<int16_t*>(&out_->pDataRx[0]+offset*cell);
-			//NVLOGV_FMT(TAG_DATALAKE,"{:4}.{:02} {} us: Copying {} elements from {:p} to fhData[{}] at address {:p}", slot_->sfn_, slot_->slot_, GET_ELAPSED_US(notifyTime), nPrbs*2, (void*)prbs_int, dataIndex, (void*)pFh->fhData[dataIndex]);
-			std::memcpy(pFh->fhData[dataIndex], prbs_int, nPrbs*2 * sizeof(int16_t));
+			int16_t* prbs_int = reinterpret_cast<int16_t*>(out_->pDataRx + static_cast<size_t>(out_->dataRxHostCellStride) * cell);
+			std::memcpy(pFh->fhData[dataIndex], prbs_int, copySamples * sizeof(int16_t));
+			std::memset(pFh->fhData[dataIndex] + copySamples, 0, (numFhSamples - copySamples) * sizeof(int16_t));
 			NVLOGV_FMT(TAG_DATALAKE,"{:4}.{:02} {} us: Done copying cell {} in {} us", slot_->sfn_, slot_->slot_, GET_ELAPSED_US(notifyTime), cell, GET_ELAPSED_US(copyStart));
 		}
-		if (pFh->tsTaiNs.size() == numRowsToInsertFh) {
+		if (pFh->tsTaiNs.size() >= static_cast<size_t>(numRowsToInsertFh)) {
 			pFh->collectFullTime = std::chrono::high_resolution_clock::now();
+			pFh->collectFull = true;
 		}
 		if (p->tsTaiNs.size() == numRowsToInsertPusch) {
 			p->collectFullTime = std::chrono::high_resolution_clock::now();
@@ -1131,6 +1193,7 @@ void DataLake::collectSlot(void)
 
 			if (pHest->tsTaiNs.size() >= static_cast<size_t>(numRowsToInsertHest)) {
 				pHest->collectFullTime = std::chrono::high_resolution_clock::now();
+				pHest->collectFull = true;
 			}
 
 			NVLOGD_FMT(TAG_DATALAKE,"{:4}.{:02} {} us: collectSlot done H estimates ({} cells) in hest.{} buffer, size: {}",
@@ -1171,7 +1234,16 @@ void DataLake::collectSrs(void)
 		return;
 	}
 
+	// A ring that cannot fit this slot is still short of numRowsToInsert, so it never swaps on its own
+	pSrsIq->collectFull   |= pSrsIq->tsTaiNs.size() + nCells > static_cast<size_t>(numRowsToInsertSrsIq);
+	pSrs->collectFull     |= pSrs->tsTaiNs.size() + nSrsUes > static_cast<size_t>(numRowsToInsertSrs);
+	pSrsHest->collectFull |= pSrsHest->tsTaiNs.size() + nSrsUes > static_cast<size_t>(numRowsToInsertSrsHest);
+	if (pSrsIq->collectFull || pSrs->collectFull || pSrsHest->collectFull) {
+		doInsertsSrs();
+	}
+
 	if (pSrsIq->tsTaiNs.size() + nCells > static_cast<size_t>(numRowsToInsertSrsIq)) {
+		pSrsIq->collectFullTime = std::chrono::high_resolution_clock::now();
 		NVLOGW_FMT(TAG_DATALAKE,"{:4}.{:02} {} us: Skipping SRS slot because {} SRS IQ buffer full, size: {}. Filled in {} ms",
 			srsSlot_->sfn_,srsSlot_->slot_,GET_ELAPSED_US(srsNotifyTime),pSrsIq->bufferName,pSrsIq->tsTaiNs.size(),
 			std::chrono::duration_cast<std::chrono::milliseconds>(pSrsIq->collectFullTime - pSrsIq->collectStartTime).count());
@@ -1179,6 +1251,7 @@ void DataLake::collectSrs(void)
 	}
 
 	if (pSrs->tsTaiNs.size() + nSrsUes > static_cast<size_t>(numRowsToInsertSrs)) {
+		pSrs->collectFullTime = std::chrono::high_resolution_clock::now();
 		NVLOGW_FMT(TAG_DATALAKE,"{:4}.{:02} {} us: Skipping SRS slot because {} SRS scalar buffer full, size: {}. Filled in {} ms",
 			srsSlot_->sfn_,srsSlot_->slot_,GET_ELAPSED_US(srsNotifyTime),pSrs->bufferName,pSrs->tsTaiNs.size(),
 			std::chrono::duration_cast<std::chrono::milliseconds>(pSrs->collectFullTime - pSrs->collectStartTime).count());
@@ -1186,6 +1259,7 @@ void DataLake::collectSrs(void)
 	}
 
 	if (pSrsHest->tsTaiNs.size() + nSrsUes > static_cast<size_t>(numRowsToInsertSrsHest)) {
+		pSrsHest->collectFullTime = std::chrono::high_resolution_clock::now();
 		NVLOGW_FMT(TAG_DATALAKE,"{:4}.{:02} {} us: Skipping SRS slot because {} SRS Hest buffer full, size: {}. Filled in {} ms",
 			srsSlot_->sfn_,srsSlot_->slot_,GET_ELAPSED_US(srsNotifyTime),pSrsHest->bufferName,pSrsHest->tsTaiNs.size(),
 			std::chrono::duration_cast<std::chrono::milliseconds>(pSrsHest->collectFullTime - pSrsHest->collectStartTime).count());
@@ -1217,6 +1291,7 @@ void DataLake::collectSrs(void)
 		pSrsIq->slot.push_back(srsSlot_->slot_);
 		pSrsIq->cellId.push_back(cellId);
 		pSrsIq->nRxAntSrs.push_back(nRxAntSrs);
+		pSrsIq->nPrbUlBwp.push_back(srsStatPrms_->pCellStatPrms[cellStatIdx].nPrbUlBwp);
 		pSrsIq->nSrsUes.push_back(nSrsUes);
 
 		if (srsOut_->pDataRxSrs) {
@@ -1226,7 +1301,7 @@ void DataLake::collectSrs(void)
 			size_t copySamples = std::min(perCellSamples, static_cast<size_t>(maxSrsIqSamplesPerRow)); // To-Do: revisit for mMIMO (>4 RX ant)
 			size_t copyBytes = copySamples * sizeof(int16_t);
 			pSrsIq->iqData[dataIndex] = pSrsIq->pDataAlloc + (pSrsIq->writeOffsetBytes / sizeof(int16_t));
-			const int16_t* src = reinterpret_cast<const int16_t*>(srsOut_->pDataRxSrs) + perCellSamples * cellIdx;
+			const int16_t* src = reinterpret_cast<const int16_t*>(srsOut_->pDataRxSrs + static_cast<size_t>(srsOut_->dataRxSrsHostCellStride) * cellIdx);
 			std::memcpy(pSrsIq->iqData[dataIndex], src, copyBytes);
 			pSrsIq->writeOffsetBytes += copyBytes;
 			NVLOGV_FMT(TAG_DATALAKE,"{:4}.{:02} {} us: SRS IQ cell {} copied {} bytes offset {}",
@@ -1235,6 +1310,7 @@ void DataLake::collectSrs(void)
 	}
 	if (pSrsIq->tsTaiNs.size() >= static_cast<size_t>(numRowsToInsertSrsIq)) {
 		pSrsIq->collectFullTime = std::chrono::high_resolution_clock::now();
+		pSrsIq->collectFull = true;
 	}
 
 	// --- Per-UE: SRS scalars/RbSNR + SRS Hest ---
@@ -1297,11 +1373,13 @@ void DataLake::collectSrs(void)
 		pSrs->nValidPrg.push_back(ue.nValidPrg);
 		pSrs->prgSize.push_back(ue.prgSize);
 
-		// Replay config
+		// SRS pilot reconstruction parameters
 		pSrs->sequenceId.push_back(ue.sequenceId);
 		pSrs->configIdx.push_back(ue.configIdx);
 		pSrs->bandwidthIdx.push_back(ue.bandwidthIdx);
 		pSrs->groupOrSequenceHopping.push_back(ue.groupOrSequenceHopping);
+		pSrs->srsStartPrg.push_back(ue.srsStartPrg);
+		pSrs->startValidPrg.push_back(ue.startValidPrg);
 
 		// H-estimate grid dimensions (for JOIN with srs_hest)
 		auto& chEst = srsOut_->pSrsChEstToL2[ueIdx];
@@ -1349,9 +1427,11 @@ void DataLake::collectSrs(void)
 
 	if (pSrs->tsTaiNs.size() >= static_cast<size_t>(numRowsToInsertSrs)) {
 		pSrs->collectFullTime = std::chrono::high_resolution_clock::now();
+		pSrs->collectFull = true;
 	}
 	if (pSrsHest->tsTaiNs.size() >= static_cast<size_t>(numRowsToInsertSrsHest)) {
 		pSrsHest->collectFullTime = std::chrono::high_resolution_clock::now();
+		pSrsHest->collectFull = true;
 	}
 
 	// Store SRS buffer info for E3
@@ -1379,6 +1459,7 @@ void DataLake::collectSrs(void)
 			auto& cell  = e3_srs_buffer_info.cells[c];
 			cell.cell_id                   = pCell.phyCellId;
 			cell.n_rx_ant_srs              = pCell.nRxAntSrs;
+			cell.n_prb_ul_bwp              = pCell.nPrbUlBwp;
 			cell.srs_cell_start_sym        = srsParams_->cell_dyn_info[c].srsStartSym;
 			cell.srs_cell_n_srs_sym        = srsParams_->cell_dyn_info[c].nSrsSym;
 			cell.current_srs_iq_buffer     = curSrsIq;
@@ -1425,6 +1506,12 @@ void DataLake::collectSrs(void)
 			m.usage = ue.usage;
 			m.n_valid_prg = ue.nValidPrg;
 			m.prg_size = ue.prgSize;
+			m.sequence_id = ue.sequenceId;
+			m.config_idx = ue.configIdx;
+			m.bandwidth_idx = ue.bandwidthIdx;
+			m.group_seq_hopping = ue.groupOrSequenceHopping;
+			m.start_prg = ue.srsStartPrg;
+			m.start_valid_prg = ue.startValidPrg;
 			m.n_prb_grps = chEst.nPrbGrps;
 
 			// SHM cross-references for dApps to locate blobs in ping-pong buffers
@@ -1462,10 +1549,11 @@ void DataLake::collectSrs(void)
 
 void DataLake::doInsertsPusch() {
 	bool inserted = false;
-	if(pInsertFh->tsTaiNs.size() == 0 && pFh->tsTaiNs.size() >= numRowsToInsertFh) {
+	if(pInsertFh->tsTaiNs.size() == 0 && pFh->collectFull) {
 		NVLOGD_FMT(TAG_DATALAKE,"{:4}.{:02} {} pFH: {}, {} us since notify",
 			slot_->sfn_,slot_->slot_,__FUNCTION__,pFh->bufferName,GET_ELAPSED_US(notifyTime));
 		std::swap(pFh, pInsertFh);
+		pFh->collectFull = false;
 
 		if (fhDbEnabled) {
 			inserted = true;
@@ -1488,10 +1576,11 @@ void DataLake::doInsertsPusch() {
 		}
 	}
 
-	if(pInsertHest->tsTaiNs.size() == 0 && pHest->tsTaiNs.size() >= numRowsToInsertHest) {
+	if(pInsertHest->tsTaiNs.size() == 0 && pHest->collectFull) {
 		NVLOGD_FMT(TAG_DATALAKE,"{:4}.{:02} {} pHest: {}, {} us since notify",
 			slot_->sfn_,slot_->slot_,__FUNCTION__,pHest->bufferName,GET_ELAPSED_US(notifyTime));
 		std::swap(pHest, pInsertHest);
+		pHest->collectFull = false;
 		pHest->writeOffsetBytes = 0;
 
 		if (hestDbEnabled) {
@@ -1513,10 +1602,11 @@ void DataLake::doInsertsPusch() {
 void DataLake::doInsertsSrs() {
 	bool inserted = false;
 
-	if (pInsertSrsIq->tsTaiNs.size() == 0 && pSrsIq->tsTaiNs.size() >= static_cast<size_t>(numRowsToInsertSrsIq)) {
+	if (pInsertSrsIq->tsTaiNs.size() == 0 && pSrsIq->collectFull) {
 		NVLOGD_FMT(TAG_DATALAKE,"{:4}.{:02} {} pSrsIq: {}, {} us since notify",
 			srsSlot_->sfn_,srsSlot_->slot_,__FUNCTION__,pSrsIq->bufferName,GET_ELAPSED_US(srsNotifyTime));
 		std::swap(pSrsIq, pInsertSrsIq);
+		pSrsIq->collectFull = false;
 		pSrsIq->writeOffsetBytes = 0;
 
 		if (srsIqDbEnabled) {
@@ -1527,10 +1617,11 @@ void DataLake::doInsertsSrs() {
 		}
 	}
 
-	if (pInsertSrs->tsTaiNs.size() == 0 && pSrs->tsTaiNs.size() >= static_cast<size_t>(numRowsToInsertSrs)) {
+	if (pInsertSrs->tsTaiNs.size() == 0 && pSrs->collectFull) {
 		NVLOGD_FMT(TAG_DATALAKE,"{:4}.{:02} {} pSrs: {}, {} us since notify",
 			srsSlot_->sfn_,srsSlot_->slot_,__FUNCTION__,pSrs->bufferName,GET_ELAPSED_US(srsNotifyTime));
 		std::swap(pSrs, pInsertSrs);
+		pSrs->collectFull = false;
 		pSrs->writeOffsetBytes = 0;
 
 		if (srsDbEnabled) {
@@ -1541,10 +1632,11 @@ void DataLake::doInsertsSrs() {
 		}
 	}
 
-	if (pInsertSrsHest->tsTaiNs.size() == 0 && pSrsHest->tsTaiNs.size() >= static_cast<size_t>(numRowsToInsertSrsHest)) {
+	if (pInsertSrsHest->tsTaiNs.size() == 0 && pSrsHest->collectFull) {
 		NVLOGD_FMT(TAG_DATALAKE,"{:4}.{:02} {} pSrsHest: {}, {} us since notify",
 			srsSlot_->sfn_,srsSlot_->slot_,__FUNCTION__,pSrsHest->bufferName,GET_ELAPSED_US(srsNotifyTime));
 		std::swap(pSrsHest, pInsertSrsHest);
+		pSrsHest->collectFull = false;
 		pSrsHest->writeOffsetBytes = 0;
 
 		if (srsHestDbEnabled) {
@@ -1872,6 +1964,7 @@ void DataLake::insertFh(fhInfo_t* fhInfo) {
 	auto slotCol = std::make_shared<ch::ColumnUInt16>();
 	auto nRxAntCol = std::make_shared<ch::ColumnUInt16>();
 	auto nRxAntSrsCol = std::make_shared<ch::ColumnUInt16>();
+	auto nPrbUlBwpCol = std::make_shared<ch::ColumnUInt16>();
 	auto nUesCol = std::make_shared<ch::ColumnUInt16>();
 
 	// Fill columns from vectors
@@ -1884,6 +1977,7 @@ void DataLake::insertFh(fhInfo_t* fhInfo) {
 		slotCol->Append(fhInfo->slot[i]);
 		nRxAntCol->Append(fhInfo->nRxAnt[i]);
 		nRxAntSrsCol->Append(fhInfo->nRxAntSrs[i]);
+		nPrbUlBwpCol->Append(fhInfo->nPrbUlBwp[i]);
 		nUesCol->Append(fhInfo->nUes[i]);
 	}
 	auto appendHestEnd = std::chrono::high_resolution_clock::now();
@@ -1912,6 +2006,7 @@ void DataLake::insertFh(fhInfo_t* fhInfo) {
 	block.AppendColumn("Slot", slotCol);
 	block.AppendColumn("nRxAnt", nRxAntCol);
 	block.AppendColumn("nRxAntSrs", nRxAntSrsCol);
+	block.AppendColumn("nPrbUlBwp", nPrbUlBwpCol);
 	block.AppendColumn("nUEs", nUesCol);
 	block.AppendColumn("fhData", fhDataCol);
 
@@ -2096,6 +2191,7 @@ void DataLake::insertSrsIq(srsIqInfo_t* info) {
 	auto sfnCol = std::make_shared<ch::ColumnUInt16>();
 	auto slotCol = std::make_shared<ch::ColumnUInt16>();
 	auto nRxAntSrsCol = std::make_shared<ch::ColumnUInt16>();
+	auto nPrbUlBwpCol = std::make_shared<ch::ColumnUInt16>();
 	auto nSrsUesCol = std::make_shared<ch::ColumnUInt16>();
 
 	auto appendStart = std::chrono::high_resolution_clock::now();
@@ -2106,6 +2202,7 @@ void DataLake::insertSrsIq(srsIqInfo_t* info) {
 		sfnCol->Append(info->sfn[i]);
 		slotCol->Append(info->slot[i]);
 		nRxAntSrsCol->Append(info->nRxAntSrs[i]);
+		nPrbUlBwpCol->Append(info->nPrbUlBwp[i]);
 		nSrsUesCol->Append(info->nSrsUes[i]);
 	}
 	auto appendEnd = std::chrono::high_resolution_clock::now();
@@ -2135,6 +2232,7 @@ void DataLake::insertSrsIq(srsIqInfo_t* info) {
 	block.AppendColumn("SFN", sfnCol);
 	block.AppendColumn("Slot", slotCol);
 	block.AppendColumn("nRxAntSrs", nRxAntSrsCol);
+	block.AppendColumn("nPrbUlBwp", nPrbUlBwpCol);
 	block.AppendColumn("nSrsUes", nSrsUesCol);
 	block.AppendColumn("iqData", iqDataCol);
 
@@ -2190,6 +2288,8 @@ void DataLake::insertSrs(srsInfo_t* info) {
 	auto configIdxCol = std::make_shared<ch::ColumnUInt8>();
 	auto bandwidthIdxCol = std::make_shared<ch::ColumnUInt8>();
 	auto groupOrSequenceHoppingCol = std::make_shared<ch::ColumnUInt8>();
+	auto srsStartPrgCol = std::make_shared<ch::ColumnUInt16>();
+	auto startValidPrgCol = std::make_shared<ch::ColumnUInt16>();
 	auto nPrbGrpsCol = std::make_shared<ch::ColumnUInt16>();
 	auto prbGrpSizeCol = std::make_shared<ch::ColumnUInt16>();
 	auto rbSnrSizeCol = std::make_shared<ch::ColumnUInt32>();
@@ -2233,6 +2333,8 @@ void DataLake::insertSrs(srsInfo_t* info) {
 		configIdxCol->Append(info->configIdx[i]);
 		bandwidthIdxCol->Append(info->bandwidthIdx[i]);
 		groupOrSequenceHoppingCol->Append(info->groupOrSequenceHopping[i]);
+		srsStartPrgCol->Append(info->srsStartPrg[i]);
+		startValidPrgCol->Append(info->startValidPrg[i]);
 		nPrbGrpsCol->Append(info->nPrbGrps[i]);
 		prbGrpSizeCol->Append(info->prbGrpSize[i]);
 		rbSnrSizeCol->Append(info->rbSnrSize[i]);
@@ -2293,6 +2395,8 @@ void DataLake::insertSrs(srsInfo_t* info) {
 	block.AppendColumn("configIdx", configIdxCol);
 	block.AppendColumn("bandwidthIdx", bandwidthIdxCol);
 	block.AppendColumn("groupOrSequenceHopping", groupOrSequenceHoppingCol);
+	block.AppendColumn("srsStartPrg", srsStartPrgCol);
+	block.AppendColumn("startValidPrg", startValidPrgCol);
 	block.AppendColumn("nPrbGrps", nPrbGrpsCol);
 	block.AppendColumn("prbGrpSize", prbGrpSizeCol);
 	block.AppendColumn("rbSnrSize", rbSnrSizeCol);

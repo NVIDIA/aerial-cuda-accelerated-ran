@@ -57,10 +57,22 @@ struct SynthCfg {
 struct ReplayCfg {
 	std::string path;
 	uint64_t loops = 0;  // 0 = forever
+	bool wait_for_subscriber = false;  // start on first subscription, restart on last release
 };
 
 struct CpuCfg {
 	int feeder_core = -1;  // pins both feeder threads; -1 = no pinning
+};
+
+// Command line values that replace the matching config keys; empty = keep the config value.
+struct Overrides {
+	std::string mode;
+	std::string log_level;
+	std::string feeder_core;          // cpu.feeder_core
+	std::string duration_slots;       // synth.duration_slots
+	std::string trace;                // replay.path
+	std::string loops;                // replay.loops
+	std::string wait_for_subscriber;  // replay.wait_for_subscriber
 };
 
 struct Config {
@@ -73,7 +85,7 @@ struct Config {
 	ReplayCfg replay;
 
 	// Throws std::runtime_error on any invalid or unknown field.
-	static Config load(const std::string& path);
+	static Config load(const std::string& path, const Overrides& ov = {});
 };
 
 } // namespace e3sa

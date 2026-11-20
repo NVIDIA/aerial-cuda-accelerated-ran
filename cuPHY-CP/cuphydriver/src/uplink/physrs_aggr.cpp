@@ -118,13 +118,17 @@ PhySrsAggr::PhySrsAggr(
         dyn_params.pDataIn = &DataIn;
 
         // SRS IQ host buffer: copies buf_st_2 GPU->host (mirrors PUSCH bDataRx pattern)
-        int totSrsIqSize = (ORAN_MAX_PRB * CUPHY_N_TONES_PER_PRB) * ORAN_MAX_SRS_SYMBOLS * srs_rx_ant_dim * UL_SRS_MAX_CELLS_PER_SLOT;
+        const int srsIqCellStride = (ORAN_MAX_PRB * CUPHY_N_TONES_PER_PRB) * ORAN_MAX_SRS_SYMBOLS * srs_rx_ant_dim;
+        int totSrsIqSize = srsIqCellStride * UL_SRS_MAX_CELLS_PER_SLOT;
         if(pdctx->datalake_enabled()) {
             bDataRxSrs  = std::move(cuphy::buffer<__half2, cuphy::pinned_alloc>(totSrsIqSize));
+            std::memset(bDataRxSrs.addr(), 0, totSrsIqSize * sizeof(__half2));
             DataOut.pDataRxSrs = bDataRxSrs.addr();
+            DataOut.dataRxSrsHostCellStride = srsIqCellStride;
         } else {
             bDataRxSrs  = std::move(cuphy::buffer<__half2, cuphy::pinned_alloc>(0));
             DataOut.pDataRxSrs = nullptr;
+            DataOut.dataRxSrsHostCellStride = 0;
         }
 
         // Data OUT

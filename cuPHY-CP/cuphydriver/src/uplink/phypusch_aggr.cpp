@@ -98,10 +98,12 @@ PhyPuschAggr::PhyPuschAggr(
 
         // Antenna dimension comes from runtime UL eAxC count.
         const int pusch_ap_dim = static_cast<int>(pdctx->getMaxUlAntennaPorts());
-        int totFhDataSize = (ORAN_MAX_PRB * CUPHY_N_TONES_PER_PRB) * OFDM_SYMBOLS_PER_SLOT * pusch_ap_dim * UL_MAX_CELLS_PER_SLOT;
+        const int fhDataCellStride = (ORAN_MAX_PRB * CUPHY_N_TONES_PER_PRB) * OFDM_SYMBOLS_PER_SLOT * pusch_ap_dim;
+        int totFhDataSize = fhDataCellStride * UL_MAX_CELLS_PER_SLOT;
         // Don't allocate the memory if we're not going to use it
         if(pdctx->datalake_enabled()) {
             bDataRx     = std::move(cuphy::buffer<__half2, cuphy::pinned_alloc>(totFhDataSize));
+            std::memset(bDataRx.addr(), 0, totFhDataSize * sizeof(__half2));
         }
         else {
             bDataRx     = std::move(cuphy::buffer<__half2, cuphy::pinned_alloc>(0));
@@ -144,9 +146,11 @@ PhyPuschAggr::PhyPuschAggr(
 
         // PuschRx::copyOutputToCPU() copies out of memory if this address is valid
         if(pdctx->datalake_enabled()) {
-            DataOut.pDataRx            = bDataRx.addr();
+            DataOut.pDataRx              = bDataRx.addr();
+            DataOut.dataRxHostCellStride = fhDataCellStride;
         } else {
-            DataOut.pDataRx            = nullptr;
+            DataOut.pDataRx              = nullptr;
+            DataOut.dataRxHostCellStride = 0;
         }
 
         // Channel estimates API pointers

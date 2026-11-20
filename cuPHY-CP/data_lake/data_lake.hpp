@@ -64,7 +64,7 @@ struct E3UeMetrics {
 	uint8_t nr_of_symbols{};        // per-group
 	uint32_t tb_size{};
 	uint32_t pdu_len{};             // tb_size on CRC pass, 0 on CRC fail
-	uint32_t pdu_offset{};          // byte offset of this UE's PDU in the PUSCH SHM buffer
+	uint32_t pdu_offset{};          // byte offset of this UE's PDU from the start of the PUSCH SHM buffer half
 	uint16_t target_code_rate{};
 	uint8_t new_data_indicator{};
 	uint8_t n_layers{};
@@ -86,6 +86,7 @@ struct E3CellInfo {
 	uint16_t cell_id{};
 	uint16_t n_rx_ant{};
 	uint16_t n_rx_ant_srs{};
+	uint16_t n_prb_ul_bwp{};
 	uint8_t  n_bs_ants{};
 	uint16_t n_ue{};
 
@@ -127,6 +128,7 @@ struct puschInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
 	std::vector<uint16_t> sfn;
@@ -278,6 +280,7 @@ struct fhInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint16_t> cellId;
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
@@ -285,11 +288,12 @@ struct fhInfo_t {
 	std::vector<uint16_t> slot;
 	std::vector<uint16_t> nRxAnt;
 	std::vector<uint16_t> nRxAntSrs;
+	std::vector<uint16_t> nPrbUlBwp;
 	std::vector<uint16_t> nUes;
 	int16_t* pDataAlloc;
 	std::vector<int16_t*> fhData;
 };
-const uint32_t FH_INFO_MEMBER_COUNT = 9; // cellId, tsSwNs, tsTaiNs, sfn, slot, nRxAnt, nRxAntSrs, nUes, fhData
+const uint32_t FH_INFO_MEMBER_COUNT = 10; // cellId, tsSwNs, tsTaiNs, sfn, slot, nRxAnt, nRxAntSrs, nPrbUlBwp, nUes, fhData
 
 template<typename F>
 void forEachFhInfoMember(fhInfo_t* info, F&& func) {
@@ -300,6 +304,7 @@ void forEachFhInfoMember(fhInfo_t* info, F&& func) {
 	func(info->slot);
 	func(info->nRxAnt);
 	func(info->nRxAntSrs);
+	func(info->nPrbUlBwp);
 	func(info->nUes);
 	// Don't do anything with pDataAlloc or fhData:
 	// pDataAlloc will be overwritten, and fhData are constant
@@ -321,6 +326,7 @@ struct hestInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint16_t> cellId;
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
@@ -354,18 +360,20 @@ struct srsIqInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint16_t> cellId;
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
 	std::vector<uint16_t> sfn;
 	std::vector<uint16_t> slot;
 	std::vector<uint16_t> nRxAntSrs;
+	std::vector<uint16_t> nPrbUlBwp;
 	std::vector<uint16_t> nSrsUes;
 	int16_t* pDataAlloc;
 	std::vector<int16_t*> iqData;
 	size_t writeOffsetBytes{};             // Running byte cursor into pDataAlloc
 };
-const uint32_t SRS_IQ_INFO_MEMBER_COUNT = 8; // cellId, tsSwNs, tsTaiNs, sfn, slot, nRxAntSrs, nSrsUes, iqData
+const uint32_t SRS_IQ_INFO_MEMBER_COUNT = 9; // cellId, tsSwNs, tsTaiNs, sfn, slot, nRxAntSrs, nPrbUlBwp, nSrsUes, iqData
 
 template<typename F>
 void forEachSrsIqInfoMember(srsIqInfo_t* info, F&& func) {
@@ -375,6 +383,7 @@ void forEachSrsIqInfoMember(srsIqInfo_t* info, F&& func) {
 	func(info->sfn);
 	func(info->slot);
 	func(info->nRxAntSrs);
+	func(info->nPrbUlBwp);
 	func(info->nSrsUes);
 }
 
@@ -390,6 +399,7 @@ struct srsHestInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint16_t> cellId;
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
@@ -424,6 +434,7 @@ struct srsInfo_t {
 	std::string bufferName;
 	std::chrono::high_resolution_clock::time_point collectStartTime;
 	std::chrono::high_resolution_clock::time_point collectFullTime;
+	bool collectFull{false};
 	std::vector<uint16_t> cellId;
 	std::vector<uint64_t> tsSwNs;
 	std::vector<uint64_t> tsTaiNs;
@@ -456,11 +467,13 @@ struct srsInfo_t {
 	std::vector<uint32_t> usage;
 	std::vector<uint16_t> nValidPrg;
 	std::vector<uint16_t> prgSize;
-	// Replay config (Data Lake only, not E3)
+	// SRS pilot reconstruction parameters (38.211 6.4.1.4)
 	std::vector<uint16_t> sequenceId;
 	std::vector<uint8_t> configIdx;
 	std::vector<uint8_t> bandwidthIdx;
 	std::vector<uint8_t> groupOrSequenceHopping;
+	std::vector<uint16_t> srsStartPrg;
+	std::vector<uint16_t> startValidPrg;
 	// H-estimate grid dimensions (needed to decode srs_hest blob via JOIN on sfn+slot+rnti)
 	std::vector<uint16_t> nPrbGrps;
 	std::vector<uint16_t> prbGrpSize;
@@ -511,6 +524,8 @@ void forEachSrsInfoMember(srsInfo_t* info, F&& func) {
 	func(info->configIdx);
 	func(info->bandwidthIdx);
 	func(info->groupOrSequenceHopping);
+	func(info->srsStartPrg);
+	func(info->startValidPrg);
 	func(info->nPrbGrps);
 	func(info->prbGrpSize);
 	func(info->nCells);
@@ -551,6 +566,12 @@ struct E3SrsUeMetrics {
 	uint32_t usage{};
 	uint16_t n_valid_prg{};
 	uint16_t prg_size{};
+	uint16_t sequence_id{};
+	uint8_t config_idx{};
+	uint8_t bandwidth_idx{};
+	uint8_t group_seq_hopping{};
+	uint16_t start_prg{};
+	uint16_t start_valid_prg{};
 	uint16_t n_prb_grps{};
 	// SHM cross-references
 	uint32_t srs_hest_offset{};
@@ -563,6 +584,7 @@ struct E3SrsUeMetrics {
 struct E3SrsCellInfo {
 	uint16_t cell_id{};
 	uint16_t n_rx_ant_srs{};
+	uint16_t n_prb_ul_bwp{};
 	uint8_t  srs_cell_start_sym{};
 	uint8_t  srs_cell_n_srs_sym{};
 	uint16_t n_srs_ue{};
@@ -608,7 +630,8 @@ class DataLake {
 		const uint16_t e3RepPort = 5555, // E3 reply port
 		const uint16_t e3PubPort = 5556, // E3 publisher port
 		const uint16_t e3SubPort = 5557, // E3 subscriber port
-		const bool dropTables = false
+		const bool dropTables = false,
+		const std::string columnCodec = "" // CODEC of the array columns, empty = server default
     ):
 		numSamples_(numSamples),
 		numRowsToInsertHest(numRowsToInsertHest),
@@ -624,6 +647,7 @@ class DataLake {
 		numRowsToInsertFh(numRowsToInsertFh),
 		numRowsToInsertPusch(numRowsToInsertPusch),
 		dropTables(dropTables),
+		columnCodec(columnCodec),
 		enableDbInsert(enableDbInsert),
 		storeFailedPdu(storeFailedPdu),
 		datalakeDataTypes(datalakeDataTypes),
@@ -723,6 +747,7 @@ class DataLake {
 		bool debug = false;
 		bool flushColumns = false;
 		const bool dropTables = false;
+		const std::string columnCodec;
 		const int numThreads = 7;
 		const bool enableDbInsert = true;
 		const bool storeFailedPdu = false;
@@ -742,6 +767,7 @@ class DataLake {
 
 		const uint32_t nPrbs = 273*12*14*4;
 		const uint32_t numFhSamples = nPrbs*2; // 2 for I & Q
+		const uint32_t fhSamplesPerAnt = 273*12*14*2;
 		const uint32_t totalFhBytes;
 
 		// --- Max per-row sizing constants ---
@@ -750,7 +776,7 @@ class DataLake {
 		static constexpr uint32_t maxPuschPduSize = 160000;
 
 		// PUSCH Hest (all UE groups concatenated; FDM-partitioned, total bounded by cell bandwidth)
-		// Physical memory layout per group: [NH_DMRS][N_SUBCARRIERS][N_BS_ANTS][N_LAYERS] (row-major)
+		// Physical memory layout per group: [NH_DMRS][N_SUBCARRIERS][N_LAYERS][N_BS_ANTS] (row-major)
 		// NH = dmrsAddlnPos + 1 (1-4), NF = nPrb*12, N_BS_ANTS = N_RX_ANT (typ. 4), N_LAYERS = per-group layer count
 		// Worst case: NH=4, NF=273*12=3276, N_ANT=4, N_LAYERS=4 -> 4*3276*4*4 = 209,664 complex samples (~1.6 MB/row)
 		const uint32_t maxHestSamplesPerRow = 273 * 12 * 4 * 4 * 4;
@@ -782,6 +808,7 @@ class DataLake {
 		const slot_command_api::pusch_params* params_;
 		const ::cuphyPuschDataOut_t * out_;
 		const ::cuphyPuschStatPrms_t * puschStatPrms_;
+		uint8_t tbCrcFail_[MAX_N_TBS_PER_CELL_GROUP_SUPPORTED];
 		std::vector<std::tuple<uint16_t,uint32_t>> ueSampCnt;
 
 		// ClickHouse columns for FH IQ

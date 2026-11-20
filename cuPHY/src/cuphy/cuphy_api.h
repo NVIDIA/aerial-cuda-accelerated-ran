@@ -585,7 +585,8 @@ typedef struct _cuphyPuschDataOut
     uint16_t totNumUciSegs;
 
     /// PUSCH processing results
-    __half2*  pDataRx;
+    __half2*  pDataRx;              /*< Optional host copy of the received IQ: per cell [nRxAnt][14][MAX_N_PRBS_SUPPORTED * 12], valid PRBs [0, nPrbUlBwp) */
+    uint32_t  dataRxHostCellStride; /*< Elements between consecutive cells in pDataRx */
     uint32_t* pCbCrcs;
     uint32_t* pTbCrcs;
     uint8_t*  pTbPayloads;
@@ -631,8 +632,8 @@ typedef struct _cuphyPuschDataOut
     uint8_t* pPreEarlyHarqWaitKernelStatusGpu;  /// Pointer to device memory which holds the status of preEarlyHarqWaitKernel
     uint8_t* pPostEarlyHarqWaitKernelStatusGpu; /// Pointer to device memory which holds the status of postEarlyHarqWaitKernel
 
-    float2* pChannelEsts; /*< Channel Estimates: Pointer to H matrix estimates, all UE groups concatenated.
-                              Physical memory layout per group: (nDmrsEstimates, nSubcarriers, nRxAnt, nLayers) in row-major order.
+    float2* pChannelEsts; /*!< Channel Estimates: Pointer to H matrix estimates, all UE groups concatenated.
+                              Physical memory layout per group: (nDmrsEstimates, nSubcarriers, nLayers, nRxAnt) in row-major order.
                               Note: PyAerial transposes this to (nRxAnt, nLayers, nSubcarriers, nDmrsEstimates) for user convenience.
                               Use pChannelEstSizes to determine per-group data size in elements */
 
@@ -1466,7 +1467,8 @@ typedef struct _cuphySrsDataIn
 
 typedef struct _cuphySrsDataOut
 {
-    __half2*   pDataRxSrs;         // host-pinned buffer for raw SRS IQ from buf_st_2 (GPU->host copy, gated on DataLake)
+    __half2*   pDataRxSrs;         // host-pinned buffer for raw SRS IQ from buf_st_2 (GPU->host copy, gated on DataLake): per cell [nRxAntSrs][input symbols][MAX_N_PRBS_SUPPORTED * 12]
+    uint32_t   dataRxSrsHostCellStride; // elements between consecutive cells in pDataRxSrs
 
     cuphySrsChEstBuffInfo_t* pChEstBuffInfo;  // array of ChEst buffers of all users
     cuphySrsReport_t*        pSrsReports;     // array containing SRS reports of all users

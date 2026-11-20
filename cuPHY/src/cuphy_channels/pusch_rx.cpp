@@ -1748,6 +1748,7 @@ cuphyStatus_t PuschRx::setupCmnPhase1(cuphyPuschDynPrms_t* pDynPrm)
 
     pDynPrm->pDataOut->totNumUciSegs        = m_outputPrms.totNumUciSegs;
     m_outputPrms.pDataRxHost                = pDynPrm->pDataOut->pDataRx;
+    m_outputPrms.dataRxHostCellStride       = pDynPrm->pDataOut->dataRxHostCellStride;
     m_outputPrms.pTbCrcsHost                = pDynPrm->pDataOut->pTbCrcs;
     m_outputPrms.pCbCrcsHost                = pDynPrm->pDataOut->pCbCrcs;
     m_outputPrms.pTbPayloadsHost            = pDynPrm->pDataOut->pTbPayloads;
@@ -1881,14 +1882,14 @@ cuphyStatus_t PuschRx::setupCmnPhase2(cuphyPuschDynPrms_t* pDynPrm)
             int32_t cellPrmStatIdx = cellGrpDynPrm.pCellPrms[cellIdx].cellPrmStatIdx;
             int32_t cellPrmDynIdx  = cellGrpDynPrm.pCellPrms[cellIdx].cellPrmDynIdx;
 
-            const int NF       = CUPHY_N_TONES_PER_PRB * m_cuphyCellStatPrmVecCpu[cellPrmStatIdx].nPrbUlBwp;
-            const int NT       = 14;
-            const int N_BS_ANT = m_cuphyCellStatPrmVecCpu[cellPrmStatIdx].nRxAnt;
-#ifdef ASIM_CUPHY_FP32
-            m_tRefDataRx[cellIdx].desc().set(CUPHY_C_32F, NF, NT, N_BS_ANT, cuphy::tensor_flags::align_tight);
-#else
-            m_tRefDataRx[cellIdx].desc().set(CUPHY_C_16F, NF, NT, N_BS_ANT, cuphy::tensor_flags::align_tight);
-#endif
+            // View of the nPrbUlBwp PRBs inside the pusch_prb_stride pitched input buffer
+            cuphyDataType_t dataType;
+            int             rank;
+            int             dims[CUPHY_DIM_MAX];
+            int             strides[CUPHY_DIM_MAX];
+            CUPHY_CHECK(cuphyGetTensorDescriptor(pTDataRx[cellPrmDynIdx].desc, CUPHY_DIM_MAX, &dataType, &rank, dims, strides));
+            dims[0] = std::min(dims[0], CUPHY_N_TONES_PER_PRB * static_cast<int>(m_cuphyCellStatPrmVecCpu[cellPrmStatIdx].nPrbUlBwp));
+            CUPHY_CHECK(cuphySetTensorDescriptor(m_tRefDataRx[cellIdx].desc().handle(), dataType, rank, dims, strides, CUPHY_TENSOR_ALIGN_DEFAULT));
             m_tRefDataRx[cellIdx].set_addr(pTDataRx[cellPrmDynIdx].pAddr);
         }
     }
@@ -8453,13 +8454,22 @@ cuphyStatus_t PuschRx::copyOutputToCPU(cudaStream_t cuStrm)
     // 2. API change to reflect the single large buffer containing the afore-mentioned buffers.
     if(m_outputPrms.pDataRxHost)
     {
+        constexpr size_t hostRowBytes = MAX_N_PRBS_SUPPORTED * CUPHY_N_TONES_PER_PRB * sizeof(__half2);
         for(int32_t cellIdx = 0; cellIdx < m_cuphyPuschCellGrpDynPrm.nCells; ++cellIdx)
         {
-            // TODO The 16 here is based on MAX_AP_PER_SLOT which was correct for PDSCH/4T4R, but should  be number of antenna ports or number of antennas.
-            // At the moment this is only to be used with 4T4R RUs, and it has to be syncd across phypusch_aggr.cpp, pusch_rx.cpp, and data_lake.cpp.
-            int offset = (MAX_N_PRBS_SUPPORTED * CUPHY_N_TONES_PER_PRB) * OFDM_SYMBOLS_PER_SLOT * 16 * cellIdx;
+            // Copies symbol and antenna rows as one 2D block: requires strides[2] == strides[1] * dims[1]
+            int dims[CUPHY_DIM_MAX];
+            int strides[CUPHY_DIM_MAX];
+            CUPHY_CHECK(cuphyGetTensorDescriptor(m_tRefDataRx[cellIdx].desc().handle(), CUPHY_DIM_MAX, nullptr, nullptr, dims, strides));
             MemtraceDisableScope md;
-            CUDA_CHECK_EXCEPTION(cudaMemcpyAsync(m_outputPrms.pDataRxHost+offset, m_tRefDataRx[cellIdx].addr(), m_tRefDataRx[cellIdx].desc().get_size_in_bytes(), cudaMemcpyDeviceToHost, cuStrm));
+            CUDA_CHECK_EXCEPTION(cudaMemcpy2DAsync(m_outputPrms.pDataRxHost + static_cast<size_t>(m_outputPrms.dataRxHostCellStride) * cellIdx,
+                                                   hostRowBytes,
+                                                   m_tRefDataRx[cellIdx].addr(),
+                                                   strides[1] * sizeof(__half2),
+                                                   dims[0] * sizeof(__half2),
+                                                   dims[1] * dims[2],
+                                                   cudaMemcpyDeviceToHost,
+                                                   cuStrm));
         }
     }
 

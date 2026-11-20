@@ -37,7 +37,7 @@ SCRIPT_DIR=$(dirname "$SCRIPT")
 LOGFILE="quickstart-oai.log"
 
 # Configuration
-OAI_BRANCH="${OAI_BRANCH:-ATB1.1}"
+OAI_BRANCH="${OAI_BRANCH:-ATB1.2_integration}"
 OAI_REPO="${OAI_REPO:-https://github.com/duranta-project/openairinterface5g.git}"
 OAI_DIR="${OAI_DIR:-$HOME/openairinterface5g}"
 GNB_DIR="$OAI_DIR/ci-scripts/yaml_files/sa_gnb_aerial"
@@ -86,7 +86,8 @@ OPTIONS:
     -h, --help           Display this help message and exit
 
 ENVIRONMENT VARIABLES:
-    OAI_BRANCH           OAI git branch (default: ATB1.0_integration)
+    OAI_BRANCH           OAI git branch (default: ATB1.2_integration)
+    OAI_REPO             OAI git repository (default: https://github.com/duranta-project/openairinterface5g.git)
     OAI_DIR              OAI clone directory (default: ~/openairinterface5g)
     AERIAL_SDK_DIR       Aerial SDK directory (default: ~/aerial-cuda-accelerated-ran)
     RU_MAC               O-RU Ethernet MAC for L1; yq sets it on docker-compose service nv-cubb

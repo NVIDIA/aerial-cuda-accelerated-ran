@@ -9,7 +9,7 @@ holoviews==1.15.2
 
 # Storage formats (optional - for parquet/hdf5 output formats, not used by CI/CD default)
 h5py==3.7.0
-pyarrow==12.0.1
+pyarrow==14.0.1
 tables==3.7.0
 
 # Parsing

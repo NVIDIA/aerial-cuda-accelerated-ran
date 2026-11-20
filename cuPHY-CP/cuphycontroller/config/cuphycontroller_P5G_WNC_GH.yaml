@@ -180,6 +180,7 @@ cuphydriver_config:
     # datalake_address: localhost
     # datalake_engine: "MergeTree() PRIMARY KEY (TsTaiNs)"
     # # datalake_drop_tables: 0   # Set to 1 to drop Clickhouse tables at startup
+    # # datalake_compression: LZ4   # ClickHouse CODEC for the fh/hest/srs_iq/srs_hest arrays (e.g., NONE, LZ4, LZ4HC(9), ZSTD(1)). Default: LZ4.
     # datalake_data_types: [fh, pusch, hest, srs_iq, srs, srs_hest]  # Data types to write to ClickHouse DB (all types always collected in memory for E3 Agent):
                                             # fh = Fronthaul IQ, pusch = PUSCH/FAPI, hest = PUSCH channel estimates,
                                             # srs_iq = SRS IQ samples, srs = SRS scalars+RbSNR, srs_hest = SRS channel estimates

@@ -26,7 +26,7 @@ A trace is a fixed header followed by a stream of records, one per cell-slot, in
 +------------------------------------------+  /
 ```
 
-The header carries the `E3RT` magic, the trace `version`, and the `shm_layout_version` (`e3::SHM_LAYOUT_VERSION` at generation time). A reader rejects any file whose magic or SHM layout version does not match its own build, so a stale trace fails fast rather than feeding garbage into the buffers.
+The header carries the `E3RT` magic, the trace `version`, and the `shm_layout_version` (`e3::SHM_LAYOUT_VERSION` at generation time). A reader rejects any file whose magic does not match or whose `version` it cannot parse, so a stale trace fails fast rather than feeding garbage into the buffers; an SHM layout mismatch is logged as a warning. The reader accepts v1.2.0 and v1.1.0. v1.1.0 does not record `n_prb_ul_bwp` (its `PuschSlotHeader` is 32 B; its `SrsSlotHeader` has a reserved field there), so replay assumes 273 PRB and logs a warning. That is correct only for 100 MHz captures; recapture narrower carriers as v1.2.0. The v1.1.0 `SrsUeMetrics` is 65 B and ends before `sequence_id`, so replay publishes SRS pilot streams 81-86 as 0.
 
 ## Records
 
@@ -46,7 +46,7 @@ A **PUSCH** body is the slot header, the per-UE metrics, then the fronthaul and 
 
 ```text
 +------------------------------------------+
-|  PuschSlotHeader (32 B)                  |
+|  PuschSlotHeader (34 B)                  |
 +------------------------------------------+
 |  PuschUeMetrics x n_ue                   |
 +------------------------------------------+

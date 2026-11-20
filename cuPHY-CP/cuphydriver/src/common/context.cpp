@@ -425,7 +425,8 @@ PhyDriverCtx::PhyDriverCtx(const context_config& ctx_cfg) :
             ctx_cfg.e3_rep_port,
             ctx_cfg.e3_pub_port,
             ctx_cfg.e3_sub_port,
-            ctx_cfg.datalake_drop_tables));
+            ctx_cfg.datalake_drop_tables,
+            ctx_cfg.datalake_compression));
 
         // PUSCH/FH worker thread
         std::thread t = std::thread(waitForLakeData, dataLake.get());

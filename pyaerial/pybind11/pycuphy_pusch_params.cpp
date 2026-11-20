@@ -881,6 +881,7 @@ void PuschParams::setDynPrmsPhase1(const py::object& dynPrms) {
     py::object dataOut = dynPrms.attr("dataOut");
     m_puschDataOut.isEarlyHarqPresent               = 0;
     m_puschDataOut.pDataRx                          = 0;
+    m_puschDataOut.dataRxHostCellStride             = 0;
     m_puschDataOut.pCbCrcs                          = numpyArrayToPtr<uint32_t>(dataOut.attr("cbCrcs"));
     m_puschDataOut.pTbCrcs                          = numpyArrayToPtr<uint32_t>(dataOut.attr("tbCrcs"));
     m_puschDataOut.pTbPayloads                      = numpyArrayToPtr<uint8_t>(dataOut.attr("tbPayloads"));
