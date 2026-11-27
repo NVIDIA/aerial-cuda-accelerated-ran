@@ -42,10 +42,10 @@ if args.only_gen_lp:
     eng.genLP_POC2(args.pattern)
 else:
     # Generate perf pattern
-    eng.genPerfPattern(args.pattern, 'AllChannels', args.exec_cmd)  # Use exec_cmd from command line argument
+    eng.genPerfPattern(args.pattern, 'allChannels', args.exec_cmd)  # Use exec_cmd from command line argument
 
     # Alternative method to generate perf pattern using runRegression
-    # eng.runRegression(['PerfPattern'], args.pattern, ['AllChannels'])
+    # eng.runRegression(['PerfPattern'], args.pattern, ['allChannels'])
 
 toc = time.time()
 print(f"Elapsed time: {toc-tic} seconds")
